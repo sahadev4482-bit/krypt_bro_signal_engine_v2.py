@@ -19,11 +19,30 @@ import requests
 # ============================================================
 # KRYPT BRO - PURE SIGNAL GENERATOR
 # No order placement. No leverage. No exchange trading API.
-# Data: Binance public market data
+# Data: Delta Exchange India public market data
 # Alerts: Telegram (optional)
 # ============================================================
 
 ASSETS = ["BTC", "ETH"]
+
+DELTA_SYMBOLS = {
+    "BTC": "BTCUSD",
+    "ETH": "ETHUSD",
+}
+
+INTERVAL_SECONDS = {
+    "1m": 60,
+    "3m": 180,
+    "5m": 300,
+    "15m": 900,
+    "30m": 1800,
+    "1h": 3600,
+    "2h": 7200,
+    "4h": 14400,
+    "6h": 21600,
+    "1d": 86400,
+    "1w": 604800,
+}
 SCAN_INTERVAL_SECONDS = int(os.getenv("SCAN_INTERVAL_SECONDS", "20"))
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
@@ -52,7 +71,7 @@ VOLUME_MULTIPLIER = float(os.getenv("VOLUME_MULTIPLIER", "1.05"))
 # ATR-based risk
 ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", "1.20"))
 
-BINANCE_BASE_URL = "https://api.binance.com"
+DELTA_BASE_URL = "https://api.india.delta.exchange"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -163,34 +182,102 @@ def send_telegram_alert(message: str) -> None:
 # ============================================================
 
 def fetch_candles(asset: str, interval: str, count: int = 200) -> pd.DataFrame:
-    symbol = f"{asset}USDT"
-    url = f"{BINANCE_BASE_URL}/api/v3/klines"
-    params = {"symbol": symbol, "interval": interval, "limit": count}
+    """
+    Fetch OHLCV candles directly from Delta Exchange India.
+
+    Public endpoint:
+      GET /v2/history/candles
+
+    No Delta dependency and no API key required for this market-data call.
+    """
+    symbol = DELTA_SYMBOLS.get(asset)
+    seconds = INTERVAL_SECONDS.get(interval)
+
+    if not symbol or not seconds:
+        logger.error("Unsupported Delta symbol/interval: %s %s", asset, interval)
+        return pd.DataFrame()
+
+    # Request enough history for the desired number of candles.
+    # Add a small cushion because the newest candle can be forming.
+    end_ts = int(time.time())
+    start_ts = end_ts - (seconds * (count + 5))
+
+    url = f"{DELTA_BASE_URL}/v2/history/candles"
+    params = {
+        "resolution": interval,
+        "symbol": symbol,
+        "start": start_ts,
+        "end": end_ts,
+    }
+    headers = {"Accept": "application/json"}
 
     try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        rows = response.json()
+        response = requests.get(url, params=params, headers=headers, timeout=12)
 
-        df = pd.DataFrame(
-            rows,
-            columns=[
-                "open_time", "open", "high", "low", "close", "volume",
-                "close_time", "quote_volume", "trades",
-                "taker_buy_base", "taker_buy_quote", "ignore",
-            ],
-        )
+        if response.status_code != 200:
+            logger.error(
+                "Delta candle HTTP error %s | %s %s | %s",
+                response.status_code,
+                asset,
+                interval,
+                response.text[:300],
+            )
+            return pd.DataFrame()
+
+        payload = response.json()
+
+        if not payload.get("success"):
+            logger.error(
+                "Delta candle API rejected %s %s: %s",
+                asset,
+                interval,
+                payload,
+            )
+            return pd.DataFrame()
+
+        rows = payload.get("result", [])
+        if not rows:
+            logger.warning("No Delta candles returned for %s %s", asset, interval)
+            return pd.DataFrame()
+
+        df = pd.DataFrame(rows)
+
+        required = {"time", "open", "high", "low", "close", "volume"}
+        if not required.issubset(df.columns):
+            logger.error(
+                "Unexpected Delta candle response for %s %s. Columns=%s",
+                asset,
+                interval,
+                list(df.columns),
+            )
+            return pd.DataFrame()
 
         for col in ["open", "high", "low", "close", "volume"]:
             df[col] = pd.to_numeric(df[col], errors="coerce")
 
-        df["open_time"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
-        df["close_time"] = pd.to_datetime(df["close_time"], unit="ms", utc=True)
-        return df.dropna().reset_index(drop=True)
+        df["time"] = pd.to_numeric(df["time"], errors="coerce")
+        df = df.dropna(subset=["time", "open", "high", "low", "close", "volume"])
 
+        # Delta candle time is Unix seconds.
+        df["open_time"] = pd.to_datetime(df["time"], unit="s", utc=True)
+        df["close_time"] = pd.to_datetime(df["time"] + seconds, unit="s", utc=True)
+
+        # Always work oldest -> newest, then keep only requested history.
+        df = (
+            df.sort_values("time")
+            .drop_duplicates(subset=["time"], keep="last")
+            .tail(count)
+            .reset_index(drop=True)
+        )
+
+        return df[["open_time", "open", "high", "low", "close", "volume", "close_time"]]
+
+    except requests.RequestException as exc:
+        logger.error("Delta network error for %s %s: %s", asset, interval, exc)
     except Exception:
-        logger.exception("Failed to fetch %s %s candles", asset, interval)
-        return pd.DataFrame()
+        logger.exception("Failed to process Delta candles for %s %s", asset, interval)
+
+    return pd.DataFrame()
 
 
 # ============================================================
@@ -782,6 +869,7 @@ def scan_once() -> None:
 
 def main() -> None:
     logger.info("KRYPT BRO Signal Generator started")
+    logger.info("Market data source: DELTA INDIA ONLY")
     logger.info("Assets: %s", ", ".join(ASSETS))
     logger.info("Minimum score: %s", MIN_SIGNAL_SCORE)
     logger.info("Scanner: %s", "ON" if SCANNER_ENABLED else "OFF")
