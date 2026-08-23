@@ -53,3 +53,16 @@ Features:
 - Square Off All using reduce-only market orders
 - TOTP remains UI-only because API-key trading uses signed API credentials
 - No auto-execution from signals
+
+CORRECTED FULL RELEASE
+- delta_trading.py INCLUDED
+- TOTP UI REMOVED
+- Replaced with Delta API / Trading / Telegram status panel
+- API key + secret expected only in Render Environment
+- Locked robotic single-page UI retained
+- Manual BUY/SELL retained
+- Positions retained
+- Individual Square Off retained
+- Square Off All retained
+- BTC/ETH/GOLD strategy retained
+- 40-token Delta ticker groups retained

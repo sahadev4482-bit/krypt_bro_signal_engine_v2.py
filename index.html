@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KRYPT BRO</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="beam beam-a"></div>
+  <div class="beam beam-b"></div>
+  <div class="scanline"></div>
+
+  <div class="terminal">
+    <header class="top glass hud-edge">
+      <div class="brand">
+        <div class="brand-icon">⚡</div>
+        <div>
+          <h1>KRYPT BRO</h1>
+          <p>DELTA • VOLUME • BREAKOUT/RETEST • MIN R:R 1:1.8</p>
+        </div>
+      </div>
+
+      <div class="stats">
+        <div class="stat"><span>ACTIVE SIGNALS</span><b id="activeSignals">0</b></div>
+        <div class="stat"><span>A+ / A GRADE</span><b id="highGrade">0</b></div>
+        <div class="stat"><span>SCANNED</span><b id="scanned">3 / 3</b></div>
+        <div class="stat"><span>ENGINE</span><b>5M CLOSE</b></div>
+        <div class="stat"><span>DATA</span><b>DELTA</b></div>
+      </div>
+
+      <div class="live-pill"><i></i> LIVE</div>
+    </header>
+
+    <div class="body-grid">
+      <aside class="sidebar glass hud-edge">
+        <button class="nav active">⌂ <span>Dashboard</span></button>
+        <button class="nav">◎ <span>Signals</span></button>
+        <button class="nav">◈ <span>Tokens</span></button>
+        <button class="nav">▣ <span>Positions</span></button>
+        <button class="nav">☷ <span>Journal</span></button>
+        <button class="nav">⚙ <span>Settings</span></button>
+
+        <div class="side-status">
+          <div><span>Telegram</span><b id="sideTg">ON</b></div>
+          <div><span>Scanner</span><b id="sideScan">ON</b></div>
+          <div><span>Delta</span><b>CONNECTED</b></div>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <section class="control glass hud-edge">
+          <div class="control-left">
+            <button id="master" class="btn btn-blue">⛶ MASTER SCAN</button>
+            <button id="tg" class="btn btn-green">TELEGRAM ON</button>
+            <button id="refreshBtn" class="btn btn-soft">↻ REFRESH</button>
+            <button id="pauseBtn" class="btn btn-dark">Ⅱ PAUSE UI</button>
+          </div>
+
+          <div class="api-status-panel">
+            <div class="api-title">SYSTEM CONNECTION</div>
+            <div class="api-status-grid">
+              <div><span>DELTA API</span><b id="deltaApiState">CHECKING</b></div>
+              <div><span>TRADING</span><b id="deltaTradingState">CHECKING</b></div>
+              <div><span>TELEGRAM</span><b id="deltaTelegramState">CHECKING</b></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="overview glass hud-edge">
+          <div class="overview-title">MARKET OVERVIEW</div>
+          <div class="overview-cards">
+            <div class="mini-market"><span>BTC</span><b id="topBTC">—</b><small id="btcState">LIVE</small></div>
+            <div class="mini-market"><span>ETH</span><b id="topETH">—</b><small id="ethState">LIVE</small></div>
+            <div class="mini-market"><span>GOLD</span><b id="topGOLD">—</b><small id="goldState">LIVE</small></div>
+            <div class="mini-market"><span>SCANNER</span><b id="scannerMetric">ON</b><small>5M GATE</small></div>
+            <div class="mini-market"><span>TELEGRAM</span><b id="telegramMetric">ON</b><small>SINGLE GROUP</small></div>
+          </div>
+        </section>
+
+        <section id="cards" class="asset-grid"></section>
+
+        <section class="lower-grid">
+          <div class="token-panel glass hud-edge">
+            <div class="panel-head">
+              <h3>TOP TOKEN SCANS</h3>
+              <div class="groups">
+                <button class="group active" data-group="1">G1</button>
+                <button class="group" data-group="2">G2</button>
+                <button class="group" data-group="3">G3</button>
+                <button class="group" data-group="4">G4</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>SYMBOL</th><th>RATE</th><th>MOVE</th><th>SCORE</th><th>STATUS</th></tr></thead>
+                <tbody id="tokenRows"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="recent-panel glass hud-edge">
+            <div class="panel-head"><h3>RECENT SIGNALS</h3><span class="panel-tag">LIVE</span></div>
+            <div id="recentSignals" class="recent-list"></div>
+          </div>
+
+          <div class="sentiment glass hud-edge">
+            <div class="panel-head"><h3>ENGINE STATUS</h3><span class="panel-tag">AUTO</span></div>
+            <div class="gauge">
+              <div class="gauge-ring"><div class="gauge-core"><span>QUALITY</span><b id="qualityScore">—</b><small>/100</small></div></div>
+            </div>
+            <div class="engine-lines">
+              <div><span>Volume filter</span><b>ON</b></div>
+              <div><span>Breakout/Retest</span><b>ON</b></div>
+              <div><span>Daily + 5M Fib</span><b>ON</b></div>
+              <div><span>Min R:R</span><b>1 : 1.8</b></div>
+            </div>
+          </div>
+        </section>
+
+
+        <section class="trade-grid">
+          <div class="trade-ticket glass hud-edge">
+            <div class="panel-head">
+              <h3>MANUAL TRADE EXECUTION</h3>
+              <span id="tradeStatus" class="panel-tag">CHECKING</span>
+            </div>
+
+            <div class="trade-form">
+              <label>
+                Product Symbol
+                <input id="tradeSymbol" placeholder="e.g. BTCUSD or option product symbol">
+              </label>
+              <label>
+                Size
+                <input id="tradeSize" type="number" min="1" step="1" value="1">
+              </label>
+              <label class="check-line">
+                <input id="reduceOnly" type="checkbox">
+                Reduce only
+              </label>
+            </div>
+
+            <div class="trade-actions">
+              <button id="buyBtn" class="btn btn-green">BUY</button>
+              <button id="sellBtn" class="btn btn-red">SELL</button>
+              <button id="reloadPositionsBtn" class="btn btn-soft">↻ POSITIONS</button>
+              <button id="squareAllBtn" class="btn danger">SQUARE OFF ALL</button>
+            </div>
+            <div id="tradeMessage" class="trade-message">Live orders require DELTA_TRADING_ENABLED=true.</div>
+          </div>
+
+          <div class="positions-panel glass hud-edge">
+            <div class="panel-head">
+              <h3>OPEN POSITIONS</h3>
+              <span class="panel-tag">REDUCE-ONLY EXIT</span>
+            </div>
+            <div class="positions-scroll">
+              <table class="positions-table">
+                <thead>
+                  <tr><th>SYMBOL</th><th>SIZE</th><th>ENTRY</th><th>P&L</th><th>ACTION</th></tr>
+                </thead>
+                <tbody id="positionsRows">
+                  <tr><td colspan="5" class="pending">Trading API not loaded yet</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="ticker glass hud-edge">
+          <span class="ticker-label">LIVE TICKER</span>
+          <div class="ticker-track" id="tickerTrack"></div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
