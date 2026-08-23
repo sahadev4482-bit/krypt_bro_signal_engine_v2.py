@@ -32,3 +32,14 @@ V3 ONE-DEPLOY STRATEGY UPDATE
 - Pending setup expires after 3 closed 5M candles
 - JSONL signal journal for later analysis
 - Existing Delta-only, BTC/ETH/GOLD, Daily+5M Fib pivots retained
+
+COLOR UI RELEASE
+- Bright sky-blue/cyan glass UI
+- No black background
+- No live candlestick chart
+- Lightweight 5-second UI refresh
+- BTC/ETH/GOLD primary signal cards
+- Daily + 5M Fib pivot panels
+- TOTP input UI placeholder for future trading login
+- 40-token visual grid (4 groups x 10), backend connection pending
+- Subtle light sweep / live-dot / tick animations only
