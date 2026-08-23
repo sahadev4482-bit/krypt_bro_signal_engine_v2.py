@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>KRYPT BRO</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  <div class="ambient ambient-a"></div>
+  <div class="ambient ambient-b"></div>
+  <div class="light-sweep"></div>
+
+  <div class="app-shell">
+    <header class="topbar glass">
+      <div class="brand">
+        <div class="brand-mark">⚡</div>
+        <div>
+          <h1>KRYPT BRO</h1>
+          <p>SCALP SIGNAL TERMINAL • DELTA</p>
+        </div>
+      </div>
+
+      <div class="top-stats">
+        <div class="stat"><span>SCANNER</span><strong id="mScanner">ON</strong></div>
+        <div class="stat"><span>TELEGRAM</span><strong id="mTelegram">ON</strong></div>
+        <div class="stat"><span>MIN R:R</span><strong>1 : 1.8</strong></div>
+        <div class="stat"><span>ENGINE</span><strong>5M CLOSE</strong></div>
+        <div class="stat"><span>DATA</span><strong>DELTA</strong></div>
+      </div>
+
+      <div class="live-pill"><span class="live-dot"></span>LIVE</div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar glass">
+        <button class="nav active">⌂ Dashboard</button>
+        <button class="nav">◎ Signals</button>
+        <button class="nav">◈ Tokens</button>
+        <button class="nav">▣ Positions</button>
+        <button class="nav">☷ Journal</button>
+        <button class="nav">⚙ Settings</button>
+
+        <div class="sidebar-status">
+          <div class="side-chip">Telegram <b id="sideTg">ON</b></div>
+          <div class="side-chip">Scanner <b id="sideScan">ON</b></div>
+          <div class="side-chip">Delta API <b>CONNECTED</b></div>
+        </div>
+      </aside>
+
+      <main>
+        <section class="controlbar glass">
+          <div>
+            <h3>SCAN CONTROLS</h3>
+            <div class="actions">
+              <button id="master" class="btn green">▶ MASTER SCAN</button>
+              <button id="tg" class="btn green">TELEGRAM ON</button>
+              <button id="refreshBtn" class="btn blue">↻ REFRESH</button>
+            </div>
+          </div>
+
+          <div>
+            <h3>TRADING LOGIN • TOTP</h3>
+            <div class="totp-row">
+              <input id="totp" maxlength="6" inputmode="numeric" placeholder="Enter 6-digit TOTP only when required">
+              <button id="totpSubmit" class="btn cyan">SUBMIT</button>
+            </div>
+            <p id="totpHint" class="hint">Trading authentication will be connected in execution phase.</p>
+          </div>
+        </section>
+
+        <section class="rate-strip">
+          <div class="rate-card glass"><span>BTC</span><strong id="topBTC">—</strong><em>LIVE</em></div>
+          <div class="rate-card glass"><span>ETH</span><strong id="topETH">—</strong><em>LIVE</em></div>
+          <div class="rate-card glass"><span>GOLD</span><strong id="topGOLD">—</strong><em>LIVE</em></div>
+        </section>
+
+        <h2 class="section-title">PRIMARY SIGNALS</h2>
+        <section id="cards" class="asset-grid"></section>
+
+        <h2 class="section-title">OTHER TOKENS • 4 GROUPS × 10</h2>
+        <section class="token-panel glass">
+          <div class="groupbar">
+            <button class="group-pill">GROUP 1</button>
+            <button class="group-pill">GROUP 2</button>
+            <button class="group-pill">GROUP 3</button>
+            <button class="group-pill">GROUP 4</button>
+          </div>
+
+          <div class="table-scroll">
+            <table class="token-table">
+              <thead>
+                <tr>
+                  <th>SYMBOL</th><th>RATE</th><th>MOVE</th><th>SCORE</th><th>STATUS</th>
+                </tr>
+              </thead>
+              <tbody id="tokenRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <footer class="footer glass">
+          <span>Delta market data</span>
+          <span>No live chart</span>
+          <span>Daily + 5M Fib Pivot</span>
+          <span>Volume + Breakout/Retest + MTF</span>
+          <span>Lightweight 5s refresh</span>
+        </footer>
+      </main>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

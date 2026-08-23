@@ -1,45 +1,24 @@
-KRYPT BRO Dashboard
-===================
-Files:
+KRYPT BRO FULLSTACK STRUCTURE
+
+Backend:
 - app.py
 - signal_engine.py
-- requirements.txt
-- render.yaml
+
+Frontend:
+- templates/index.html
+- static/css/style.css
+- static/js/app.js
 
 Render:
 Build command: pip install -r requirements.txt
 Start command: python app.py
 
-Environment variables (optional):
-TELEGRAM_BOT_TOKEN
-TELEGRAM_CHAT_ID
-RENDER_EXTERNAL_URL
-MIN_SIGNAL_SCORE=75
-MIN_RR=1.80
-
-Dashboard v2:
-- MIN_RR locked at 1.80
-- T1 = 1R, T2 = 1.8R, T3 = 2.5R
-- Signal grades A+ / A / B / NO TRADE
-- Daily Fib Pivot P, R1-R5, S1-S5
-- 5M Fib Pivot P, R1-R5, S1-S5
-
-V3 ONE-DEPLOY STRATEGY UPDATE
-- R:R floating-point edge fixed
-- MIN_RR default 1.80
-- Volume confirmation mandatory for actionable signal
-- Breakout/Breakdown + retest confirmation
-- Pending setup expires after 3 closed 5M candles
-- JSONL signal journal for later analysis
-- Existing Delta-only, BTC/ETH/GOLD, Daily+5M Fib pivots retained
-
-COLOR UI RELEASE
-- Bright sky-blue/cyan glass UI
-- No black background
-- No live candlestick chart
-- Lightweight 5-second UI refresh
-- BTC/ETH/GOLD primary signal cards
-- Daily + 5M Fib pivot panels
-- TOTP input UI placeholder for future trading login
-- 40-token visual grid (4 groups x 10), backend connection pending
-- Subtle light sweep / live-dot / tick animations only
+UI:
+- deep sky-blue/cyan/teal glass
+- separate CSS lighting/animation
+- no black background
+- no heavy live chart
+- BTC/ETH/GOLD signal cards
+- Daily + 5M Fib pivots
+- 40-token compact table placeholder
+- TOTP UI placeholder for future trading auth
