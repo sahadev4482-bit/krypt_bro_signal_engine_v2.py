@@ -12,6 +12,13 @@ let recent=[];
 async function api(path,opts={}){const r=await fetch(path,opts);return r.json()}
 function fmt(v){return v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2})}
 
+function assetIcon(asset){
+  if(asset==='BTC') return '<div class="asset-icon btc">₿</div>';
+  if(asset==='ETH') return '<div class="asset-icon eth">◆</div>';
+  if(asset==='GOLD') return '<div class="asset-icon gold">Au</div>';
+  return '<div class="asset-icon">'+asset.slice(0,1)+'</div>';
+}
+
 function pivotTable(p){
   if(!p||Object.keys(p).length===0)return '<div style="padding:0 9px 6px;color:#8fcce4;font-size:10px">Waiting for scan...</div>';
   const order=['R5','R4','R3','R2','R1','P','S1','S2','S3','S4','S5'];
@@ -82,6 +89,11 @@ async function refresh(){
   master.className=d.scanner_enabled?'btn btn-blue':'btn btn-red';
   tg.className=d.telegram_enabled?'btn btn-green':'btn btn-red';
   tg.textContent=d.telegram_enabled?'TELEGRAM ON':'TELEGRAM OFF';
+  const tgState=document.getElementById('deltaTelegramState');
+  if(tgState){
+    tgState.textContent=d.telegram_enabled?'ON':'OFF';
+    tgState.className=d.telegram_enabled?'ok':'';
+  }
 
   let html='',active=0,high=0,quality=0,count=0;
   for(const [asset,s] of Object.entries(d.assets)){
@@ -96,7 +108,7 @@ async function refresh(){
 
     html+=`<article class="card glass hud-edge">
       <div class="card-head">
-        <div class="asset-name">${asset} / USD</div>
+        <div class="asset-heading">${assetIcon(asset)}<div class="asset-title-wrap"><div class="asset-name">${asset} / USD</div><div class="asset-sub">DELTA LIVE • SIGNAL ENGINE</div></div></div>
         <button class="asset-toggle ${s.enabled?'btn btn-green':'btn btn-red'}" data-asset="${asset}">${s.enabled?'ON':'OFF'}</button>
       </div>
       <div class="row"><span>Status</span><b class="status ${cls}">${st}</b></div>
@@ -131,12 +143,6 @@ master.addEventListener('click',async()=>{await api('/api/toggle-scanner',{metho
 tg.addEventListener('click',async()=>{await api('/api/toggle-telegram',{method:'POST'});refresh()});
 refreshBtn.addEventListener('click',refresh);
 pauseBtn.addEventListener('click',()=>{uiPaused=!uiPaused;pauseBtn.textContent=uiPaused?'▶ RESUME UI':'Ⅱ PAUSE UI'});
-totpSubmit.addEventListener('click',()=>{
-  const v=totp.value.trim();
-  totpHint.textContent=/^[0-9]{6}$/.test(v)?'TOTP format accepted. Trading auth is not connected yet.':'Enter a valid 6-digit TOTP.';
-  if(/^[0-9]{6}$/.test(v))totp.value='';
-});
-
 renderTokenGroup();
 refresh();
 setInterval(refresh,5000);
@@ -145,13 +151,38 @@ setInterval(refresh,5000);
 async function loadTradingStatus(){
   try{
     const s=await api('/api/trading/status');
+
     tradeStatus.textContent=s.trading_enabled?'ARMED':(s.credentials_configured?'DISARMED':'NO API');
     tradeStatus.style.color=s.trading_enabled?'#32ef8f':'#ffd75a';
+
+    const apiState=document.getElementById('deltaApiState');
+    const tradingState=document.getElementById('deltaTradingState');
+    const telegramState=document.getElementById('deltaTelegramState');
+
+    if(apiState){
+      apiState.textContent=s.credentials_configured?'CONNECTED':'NO API';
+      apiState.className=s.credentials_configured?'ok':'bad';
+    }
+
+    if(tradingState){
+      tradingState.textContent=s.trading_enabled?'ARMED':'DISARMED';
+      tradingState.className=s.trading_enabled?'ok':'';
+    }
+
+    if(telegramState){
+      telegramState.textContent=document.getElementById('sideTg')?.textContent || 'ON';
+      telegramState.className='ok';
+    }
+
     tradeMessage.textContent=s.credentials_configured
-      ? (s.trading_enabled?'Live trading enabled. Manual orders are LIVE.':'Credentials found. Set DELTA_TRADING_ENABLED=true in Render to allow orders.')
+      ? (s.trading_enabled
+          ? 'Live trading enabled. Manual orders are LIVE.'
+          : 'Credentials found. Trading is safely DISARMED.')
       : 'Set DELTA_API_KEY and DELTA_API_SECRET in Render Environment.';
   }catch(e){
     tradeStatus.textContent='ERROR';
+    const apiState=document.getElementById('deltaApiState');
+    if(apiState){apiState.textContent='ERROR';apiState.className='bad';}
   }
 }
 

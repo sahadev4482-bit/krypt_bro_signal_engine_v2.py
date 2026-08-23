@@ -58,13 +58,13 @@
             <button id="pauseBtn" class="btn btn-dark">Ⅱ PAUSE UI</button>
           </div>
 
-          <div class="totp-wrap">
-            <label>TOTP <small>(Only when needed)</small></label>
-            <div class="totp-row">
-              <input id="totp" maxlength="6" inputmode="numeric" placeholder="Enter 6-digit TOTP">
-              <button id="totpSubmit" class="btn btn-cyan">SUBMIT</button>
+          <div class="api-status-panel">
+            <div class="api-title">SYSTEM CONNECTION</div>
+            <div class="api-status-grid">
+              <div><span>DELTA API</span><b id="deltaApiState">CHECKING</b></div>
+              <div><span>TRADING</span><b id="deltaTradingState">CHECKING</b></div>
+              <div><span>TELEGRAM</span><b id="deltaTelegramState">CHECKING</b></div>
             </div>
-            <p id="totpHint">Trading authentication backend not connected yet.</p>
           </div>
         </section>
 
