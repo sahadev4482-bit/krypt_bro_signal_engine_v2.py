@@ -99,6 +99,11 @@ LATEST_STATUS = {
         "t2": None,
         "t3": None,
         "reason": "Waiting for next closed 5M candle",
+        "grade": "-",
+        "rr": None,
+        "daily_fibs": {},
+        "five_min_fibs": {},
+        "confluence": {},
         "updated_at": None,
     }
     for asset in ASSETS
@@ -789,8 +794,8 @@ def calculate_signal(asset: str) -> dict | None:
             return None
 
         t1 = current_price + risk
-        t2 = current_price + 1.5 * risk
-        t3 = current_price + 2.0 * risk
+        t2 = current_price + MIN_RR * risk
+        t3 = current_price + 2.5 * risk
 
     else:
         atr_sl = current_price + ATR_SL_MULTIPLIER * atr
@@ -801,8 +806,8 @@ def calculate_signal(asset: str) -> dict | None:
             return None
 
         t1 = current_price - risk
-        t2 = current_price - 1.5 * risk
-        t3 = current_price - 2.0 * risk
+        t2 = current_price - MIN_RR * risk
+        t3 = current_price - 2.5 * risk
 
     rr_t2 = reward_risk(current_price, stop, t2, side)
     if rr_t2 < MIN_RR:
@@ -842,6 +847,18 @@ def calculate_signal(asset: str) -> dict | None:
         "m5_bull": m5_bull,
         "m5_bear": m5_bear,
     }
+
+
+def signal_grade(score: int | float | None) -> str:
+    if score is None:
+        return "-"
+    if score >= 90:
+        return "A+"
+    if score >= 82:
+        return "A"
+    if score >= MIN_SIGNAL_SCORE:
+        return "B"
+    return "NO TRADE"
 
 
 # ============================================================
@@ -950,6 +967,11 @@ def scan_once() -> None:
                     "t2": signal.get("t2"),
                     "t3": signal.get("t3"),
                     "reason": None,
+                    "grade": signal_grade(signal.get("score")),
+                    "rr": signal.get("rr_t2"),
+                    "daily_fibs": signal.get("daily_fibs", {}),
+                    "five_min_fibs": signal.get("five_min_fibs", {}),
+                    "confluence": signal.get("confluence", {}),
                     "updated_at": now_txt,
                 }
             else:
@@ -963,6 +985,11 @@ def scan_once() -> None:
                     "t2": None,
                     "t3": None,
                     "reason": signal.get("reason"),
+                    "grade": signal_grade(max(signal.get("long_score", 0), signal.get("short_score", 0))),
+                    "rr": None,
+                    "daily_fibs": signal.get("daily_fibs", {}),
+                    "five_min_fibs": signal.get("five_min_fibs", {}),
+                    "confluence": signal.get("confluence", {}),
                     "updated_at": now_txt,
                 }
 

@@ -16,3 +16,10 @@ TELEGRAM_CHAT_ID
 RENDER_EXTERNAL_URL
 MIN_SIGNAL_SCORE=75
 MIN_RR=1.80
+
+Dashboard v2:
+- MIN_RR locked at 1.80
+- T1 = 1R, T2 = 1.8R, T3 = 2.5R
+- Signal grades A+ / A / B / NO TRADE
+- Daily Fib Pivot P, R1-R5, S1-S5
+- 5M Fib Pivot P, R1-R5, S1-S5

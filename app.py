@@ -55,6 +55,11 @@ button{border:0;border-radius:10px;padding:11px 16px;font-weight:700;cursor:poin
 <script>
 async function api(path, opts={}){const r=await fetch(path,opts);return await r.json();}
 function fmt(v){return v===null||v===undefined ? "-" : Number(v).toLocaleString(undefined,{maximumFractionDigits:2});}
+function pivotTable(p){
+  if(!p || Object.keys(p).length===0) return '<div class="muted" style="margin-top:8px">Waiting for scan...</div>';
+  const order=['R5','R4','R3','R2','R1','P','S1','S2','S3','S4','S5'];
+  return '<div style="margin-top:8px">'+order.map(k=>`<div class="row"><span>${k}</span><b>${fmt(p[k])}</b></div>`).join('')+'</div>';
+}
 async function refresh(){
   const d=await api('/api/status');
   document.getElementById('scannerState').textContent=d.scanner_enabled?'ON':'OFF';
@@ -72,11 +77,20 @@ async function refresh(){
       <button class="${s.enabled?'on':'off'}" onclick="toggleAsset('${asset}')">${s.enabled?'ON':'OFF'}</button></div>
       <div class="row"><span>Status</span><b class="${cls}">${st}</b></div>
       <div class="row"><span>Side</span><b>${s.latest.side||'-'}</b></div>
-      <div class="row"><span>Score</span><b>${s.latest.score??'-'}</b></div>
+      <div class="row"><span>Score / Grade</span><b>${s.latest.score??'-'} / ${s.latest.grade||'-'}</b></div>
+      <div class="row"><span>R:R</span><b>${s.latest.rr ? '1:'+Number(s.latest.rr).toFixed(2) : '-'}</b></div>
       <div class="row"><span>Price</span><b>${fmt(s.latest.price)}</b></div>
       <div class="row"><span>SL</span><b>${fmt(s.latest.stop)}</b></div>
       <div class="row"><span>T1 / T2 / T3</span><b>${fmt(s.latest.t1)} / ${fmt(s.latest.t2)} / ${fmt(s.latest.t3)}</b></div>
       <div class="muted" style="margin-top:10px">${s.latest.reason||''}</div>
+      <details style="margin-top:14px">
+        <summary><b>Daily Fib Pivot • P / R1-R5 / S1-S5</b></summary>
+        ${pivotTable(s.latest.daily_fibs)}
+      </details>
+      <details style="margin-top:10px">
+        <summary><b>5M Fib Pivot • P / R1-R5 / S1-S5</b></summary>
+        ${pivotTable(s.latest.five_min_fibs)}
+      </details>
     </div>`;
   }
   document.getElementById('cards').innerHTML=html;
