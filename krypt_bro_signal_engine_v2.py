@@ -1,4 +1,4 @@
-# KRYPT BRO SIGNAL ENGINE v2
+# KRYPT BRO SIGNAL ENGINE v3 - DELTA ONLY + GOLD + LOW LOAD
 # Pure signal generation first.
 # Includes: Daily + 5M Fib R1-R5/S1-S5, 1H/15M/5M MTF,
 # closed-candle checks, stale-data rejection, ATR/EMA extension filters,
@@ -23,11 +23,12 @@ import requests
 # Alerts: Telegram (optional)
 # ============================================================
 
-ASSETS = ["BTC", "ETH"]
+ASSETS = ["BTC", "ETH", "GOLD"]
 
 DELTA_SYMBOLS = {
     "BTC": "BTCUSD",
     "ETH": "ETHUSD",
+    "GOLD": "PAXGUSD",
 }
 
 INTERVAL_SECONDS = {
@@ -80,6 +81,11 @@ logging.basicConfig(
 logger = logging.getLogger("krypt_bro")
 
 LAST_SIGNAL = {asset: {"side": None, "time": 0} for asset in ASSETS}
+
+# Full strategy runs only once per newly closed 5-minute candle.
+# This drastically reduces REST load compared with recalculating all
+# 1D/1H/15M/5M data every 20 seconds.
+LAST_PROCESSED_5M_CLOSE = {asset: None for asset in ASSETS}
 
 
 # ============================================================
@@ -362,12 +368,15 @@ def fibonacci_pivots(high: float, low: float, close: float) -> dict:
 
 
 def get_daily_fib_levels(df_1d: pd.DataFrame) -> dict:
-    # Last row can be today's still-forming daily candle.
-    # Therefore use previous fully closed daily candle.
-    if len(df_1d) < 2:
+    if df_1d.empty:
         return {}
 
-    candle = df_1d.iloc[-2]
+    now_utc = pd.Timestamp.now(tz="UTC")
+    closed = df_1d[df_1d["close_time"] <= now_utc]
+    if closed.empty:
+        return {}
+
+    candle = closed.iloc[-1]
     return fibonacci_pivots(
         float(candle["high"]),
         float(candle["low"]),
@@ -376,11 +385,15 @@ def get_daily_fib_levels(df_1d: pd.DataFrame) -> dict:
 
 
 def get_5m_fib_levels(df_5m: pd.DataFrame) -> dict:
-    # Previous fully closed 5-minute candle only.
-    if len(df_5m) < 2:
+    if df_5m.empty:
         return {}
 
-    candle = df_5m.iloc[-2]
+    now_utc = pd.Timestamp.now(tz="UTC")
+    closed = df_5m[df_5m["close_time"] <= now_utc]
+    if closed.empty:
+        return {}
+
+    candle = closed.iloc[-1]
     return fibonacci_pivots(
         float(candle["high"]),
         float(candle["low"]),
@@ -444,7 +457,8 @@ def recent_structure(df: pd.DataFrame, lookback: int = 8) -> str:
     Simple structure filter using recent closed candles.
     Returns BULLISH / BEARISH / MIXED.
     """
-    closed = df.iloc[:-1].tail(lookback)
+    now_utc = pd.Timestamp.now(tz="UTC")
+    closed = df[df["close_time"] <= now_utc].tail(lookback)
     if len(closed) < 4:
         return "MIXED"
 
@@ -531,6 +545,51 @@ def reward_risk(entry: float, stop: float, target: float, side: str) -> float:
 
 
 # ============================================================
+# LOW-LOAD 5M CANDLE GATE
+# ============================================================
+
+def get_latest_closed_5m(asset: str):
+    """
+    Lightweight gate:
+    fetch only a few 5m candles and return the newest fully closed candle.
+    The heavy multi-timeframe strategy runs only when this timestamp changes.
+    """
+    df = fetch_candles(asset, "5m", 4)
+    if df.empty or len(df) < 2:
+        return None
+
+    now = pd.Timestamp.now(tz="UTC")
+    closed = df[df["close_time"] <= now]
+
+    if closed.empty:
+        return None
+
+    return closed.iloc[-1]
+
+
+def has_new_closed_5m(asset: str) -> bool:
+    candle = get_latest_closed_5m(asset)
+    if candle is None:
+        return False
+
+    close_time = candle["close_time"]
+    previous = LAST_PROCESSED_5M_CLOSE.get(asset)
+
+    if previous is not None and close_time <= previous:
+        return False
+
+    # Mark it before running the heavy calculation so a transient error
+    # doesn't create a high-frequency retry storm in the same candle.
+    LAST_PROCESSED_5M_CLOSE[asset] = close_time
+    logger.info(
+        "%s new 5M candle closed at %s -> full strategy scan",
+        asset,
+        close_time,
+    )
+    return True
+
+
+# ============================================================
 # SIGNAL ENGINE
 # ============================================================
 
@@ -547,10 +606,20 @@ def calculate_signal(asset: str) -> dict | None:
     df_15m = add_rsi(add_ema(df_15m, [9, 21]), 14)
     df_5m = add_atr(add_rsi(add_ema(df_5m, [9, 21]), 14), 14)
 
-    # IMPORTANT: use last fully CLOSED candles for signal decisions.
-    h1 = df_1h.iloc[-2]
-    m15 = df_15m.iloc[-2]
-    m5 = df_5m.iloc[-2]
+    # IMPORTANT: select the newest fully CLOSED candle by close_time,
+    # rather than assuming the second-last row is always the closed one.
+    now_utc = pd.Timestamp.now(tz="UTC")
+
+    h1_closed = df_1h[df_1h["close_time"] <= now_utc]
+    m15_closed = df_15m[df_15m["close_time"] <= now_utc]
+    m5_closed = df_5m[df_5m["close_time"] <= now_utc]
+
+    if h1_closed.empty or m15_closed.empty or m5_closed.empty:
+        return None
+
+    h1 = h1_closed.iloc[-1]
+    m15 = m15_closed.iloc[-1]
+    m5 = m5_closed.iloc[-1]
 
     current_price = float(m5["close"])
 
@@ -579,7 +648,7 @@ def calculate_signal(asset: str) -> dict | None:
     m5_bear = m5["ema_9"] < m5["ema_21"] and m5["close"] < m5["ema_9"]
 
     # ---------- Volume ----------
-    closed_5m = df_5m.iloc[:-1]
+    closed_5m = df_5m[df_5m["close_time"] <= now_utc]
     vol_avg_20 = float(closed_5m["volume"].tail(20).mean())
     volume_ok = float(m5["volume"]) >= vol_avg_20 * VOLUME_MULTIPLIER
 
@@ -839,6 +908,11 @@ def scan_once() -> None:
 
     for asset in ASSETS:
         try:
+            # Lightweight 5M gate first. Full MTF calculation occurs
+            # only once per newly closed 5-minute candle.
+            if not has_new_closed_5m(asset):
+                continue
+
             signal = calculate_signal(asset)
             if not signal:
                 continue
@@ -870,6 +944,8 @@ def scan_once() -> None:
 def main() -> None:
     logger.info("KRYPT BRO Signal Generator started")
     logger.info("Market data source: DELTA INDIA ONLY")
+    logger.info("GOLD source: PAXGUSD")
+    logger.info("Full strategy scan: NEW CLOSED 5M CANDLE ONLY")
     logger.info("Assets: %s", ", ".join(ASSETS))
     logger.info("Minimum score: %s", MIN_SIGNAL_SCORE)
     logger.info("Scanner: %s", "ON" if SCANNER_ENABLED else "OFF")
