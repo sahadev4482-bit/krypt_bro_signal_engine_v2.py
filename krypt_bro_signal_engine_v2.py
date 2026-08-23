@@ -8,6 +8,9 @@ import os
 import time
 import math
 import logging
+import http.server
+import socketserver
+import threading
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -35,7 +38,7 @@ TELEGRAM_ENABLED = True
 
 # Signal quality safeguards
 MIN_RR = float(os.getenv("MIN_RR", "1.50"))
-MAX_SIGNAL_AGE_SECONDS = int(os.getenv("MAX_SIGNAL_AGE_SECONDS", "90"))
+MAX_SIGNAL_AGE_SECONDS = int(os.getenv("MAX_SIGNAL_AGE_SECONDS", "360"))
 MIN_ATR_PCT = float(os.getenv("MIN_ATR_PCT", "0.08"))
 MAX_ATR_PCT = float(os.getenv("MAX_ATR_PCT", "2.50"))
 MAX_EMA_EXTENSION_ATR = float(os.getenv("MAX_EMA_EXTENSION_ATR", "1.50"))
@@ -58,6 +61,73 @@ logging.basicConfig(
 logger = logging.getLogger("krypt_bro")
 
 LAST_SIGNAL = {asset: {"side": None, "time": 0} for asset in ASSETS}
+
+
+# ============================================================
+# RENDER FREE WEB SERVICE / HEALTH SERVER
+# ============================================================
+
+class HealthHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path in ("/", "/health"):
+            body = b"KRYPT BRO Signal Engine: RUNNING"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        # Avoid filling Render logs with health-check requests.
+        return
+
+
+class ReusableTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+
+def run_health_server():
+    port = int(os.getenv("PORT", "8080"))
+    try:
+        with ReusableTCPServer(("0.0.0.0", port), HealthHandler) as server:
+            logger.info("Health server listening on port %s", port)
+            server.serve_forever()
+    except Exception:
+        logger.exception("Health server failed")
+
+
+def keep_alive_ping():
+    """
+    Optional ping loop.
+
+    Set RENDER_EXTERNAL_URL in Render if available, e.g.
+    https://your-service.onrender.com
+
+    Note: a self-ping is only a best-effort health request. Hosting-platform
+    sleep/idle policy is controlled by the platform and cannot be guaranteed
+    away by application code.
+    """
+    time.sleep(30)
+    render_url = os.getenv("RENDER_EXTERNAL_URL", "").rstrip("/")
+
+    if not render_url:
+        logger.info("RENDER_EXTERNAL_URL not set; self-ping disabled")
+        return
+
+    health_url = f"{render_url}/health"
+    logger.info("Keep-alive health ping enabled")
+
+    while True:
+        try:
+            response = requests.get(health_url, timeout=10)
+            logger.debug("Health ping status: %s", response.status_code)
+        except Exception as exc:
+            logger.warning("Health ping failed: %s", exc)
+
+        time.sleep(600)
 
 
 # ============================================================
@@ -723,4 +793,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    threading.Thread(target=run_health_server, daemon=True).start()
+    threading.Thread(target=keep_alive_ping, daemon=True).start()
     main()
