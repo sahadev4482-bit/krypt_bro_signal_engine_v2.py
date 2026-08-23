@@ -7,105 +7,172 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
-  <div class="ambient ambient-a"></div>
-  <div class="ambient ambient-b"></div>
-  <div class="light-sweep"></div>
+  <div class="bg-grid"></div>
+  <div class="beam beam-a"></div>
+  <div class="beam beam-b"></div>
+  <div class="scanline"></div>
 
-  <div class="app-shell">
-    <header class="topbar glass">
+  <div class="terminal">
+    <header class="top glass hud-edge">
       <div class="brand">
-        <div class="brand-mark">⚡</div>
+        <div class="brand-icon">⚡</div>
         <div>
           <h1>KRYPT BRO</h1>
-          <p>SCALP SIGNAL TERMINAL • DELTA</p>
+          <p>DELTA • VOLUME • BREAKOUT/RETEST • MIN R:R 1:1.8</p>
         </div>
       </div>
 
-      <div class="top-stats">
-        <div class="stat"><span>SCANNER</span><strong id="mScanner">ON</strong></div>
-        <div class="stat"><span>TELEGRAM</span><strong id="mTelegram">ON</strong></div>
-        <div class="stat"><span>MIN R:R</span><strong>1 : 1.8</strong></div>
-        <div class="stat"><span>ENGINE</span><strong>5M CLOSE</strong></div>
-        <div class="stat"><span>DATA</span><strong>DELTA</strong></div>
+      <div class="stats">
+        <div class="stat"><span>ACTIVE SIGNALS</span><b id="activeSignals">0</b></div>
+        <div class="stat"><span>A+ / A GRADE</span><b id="highGrade">0</b></div>
+        <div class="stat"><span>SCANNED</span><b id="scanned">3 / 3</b></div>
+        <div class="stat"><span>ENGINE</span><b>5M CLOSE</b></div>
+        <div class="stat"><span>DATA</span><b>DELTA</b></div>
       </div>
 
-      <div class="live-pill"><span class="live-dot"></span>LIVE</div>
+      <div class="live-pill"><i></i> LIVE</div>
     </header>
 
-    <div class="layout">
-      <aside class="sidebar glass">
-        <button class="nav active">⌂ Dashboard</button>
-        <button class="nav">◎ Signals</button>
-        <button class="nav">◈ Tokens</button>
-        <button class="nav">▣ Positions</button>
-        <button class="nav">☷ Journal</button>
-        <button class="nav">⚙ Settings</button>
+    <div class="body-grid">
+      <aside class="sidebar glass hud-edge">
+        <button class="nav active">⌂ <span>Dashboard</span></button>
+        <button class="nav">◎ <span>Signals</span></button>
+        <button class="nav">◈ <span>Tokens</span></button>
+        <button class="nav">▣ <span>Positions</span></button>
+        <button class="nav">☷ <span>Journal</span></button>
+        <button class="nav">⚙ <span>Settings</span></button>
 
-        <div class="sidebar-status">
-          <div class="side-chip">Telegram <b id="sideTg">ON</b></div>
-          <div class="side-chip">Scanner <b id="sideScan">ON</b></div>
-          <div class="side-chip">Delta API <b>CONNECTED</b></div>
+        <div class="side-status">
+          <div><span>Telegram</span><b id="sideTg">ON</b></div>
+          <div><span>Scanner</span><b id="sideScan">ON</b></div>
+          <div><span>Delta</span><b>CONNECTED</b></div>
         </div>
       </aside>
 
-      <main>
-        <section class="controlbar glass">
-          <div>
-            <h3>SCAN CONTROLS</h3>
-            <div class="actions">
-              <button id="master" class="btn green">▶ MASTER SCAN</button>
-              <button id="tg" class="btn green">TELEGRAM ON</button>
-              <button id="refreshBtn" class="btn blue">↻ REFRESH</button>
-            </div>
+      <main class="workspace">
+        <section class="control glass hud-edge">
+          <div class="control-left">
+            <button id="master" class="btn btn-blue">⛶ MASTER SCAN</button>
+            <button id="tg" class="btn btn-green">TELEGRAM ON</button>
+            <button id="refreshBtn" class="btn btn-soft">↻ REFRESH</button>
+            <button id="pauseBtn" class="btn btn-dark">Ⅱ PAUSE UI</button>
           </div>
 
-          <div>
-            <h3>TRADING LOGIN • TOTP</h3>
+          <div class="totp-wrap">
+            <label>TOTP <small>(Only when needed)</small></label>
             <div class="totp-row">
-              <input id="totp" maxlength="6" inputmode="numeric" placeholder="Enter 6-digit TOTP only when required">
-              <button id="totpSubmit" class="btn cyan">SUBMIT</button>
+              <input id="totp" maxlength="6" inputmode="numeric" placeholder="Enter 6-digit TOTP">
+              <button id="totpSubmit" class="btn btn-cyan">SUBMIT</button>
             </div>
-            <p id="totpHint" class="hint">Trading authentication will be connected in execution phase.</p>
+            <p id="totpHint">Trading authentication backend not connected yet.</p>
           </div>
         </section>
 
-        <section class="rate-strip">
-          <div class="rate-card glass"><span>BTC</span><strong id="topBTC">—</strong><em>LIVE</em></div>
-          <div class="rate-card glass"><span>ETH</span><strong id="topETH">—</strong><em>LIVE</em></div>
-          <div class="rate-card glass"><span>GOLD</span><strong id="topGOLD">—</strong><em>LIVE</em></div>
+        <section class="overview glass hud-edge">
+          <div class="overview-title">MARKET OVERVIEW</div>
+          <div class="overview-cards">
+            <div class="mini-market"><span>BTC</span><b id="topBTC">—</b><small id="btcState">LIVE</small></div>
+            <div class="mini-market"><span>ETH</span><b id="topETH">—</b><small id="ethState">LIVE</small></div>
+            <div class="mini-market"><span>GOLD</span><b id="topGOLD">—</b><small id="goldState">LIVE</small></div>
+            <div class="mini-market"><span>SCANNER</span><b id="scannerMetric">ON</b><small>5M GATE</small></div>
+            <div class="mini-market"><span>TELEGRAM</span><b id="telegramMetric">ON</b><small>SINGLE GROUP</small></div>
+          </div>
         </section>
 
-        <h2 class="section-title">PRIMARY SIGNALS</h2>
         <section id="cards" class="asset-grid"></section>
 
-        <h2 class="section-title">OTHER TOKENS • 4 GROUPS × 10</h2>
-        <section class="token-panel glass">
-          <div class="groupbar">
-            <button class="group-pill">GROUP 1</button>
-            <button class="group-pill">GROUP 2</button>
-            <button class="group-pill">GROUP 3</button>
-            <button class="group-pill">GROUP 4</button>
+        <section class="lower-grid">
+          <div class="token-panel glass hud-edge">
+            <div class="panel-head">
+              <h3>TOP TOKEN SCANS</h3>
+              <div class="groups">
+                <button class="group active" data-group="1">G1</button>
+                <button class="group" data-group="2">G2</button>
+                <button class="group" data-group="3">G3</button>
+                <button class="group" data-group="4">G4</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>SYMBOL</th><th>RATE</th><th>MOVE</th><th>SCORE</th><th>STATUS</th></tr></thead>
+                <tbody id="tokenRows"></tbody>
+              </table>
+            </div>
           </div>
 
-          <div class="table-scroll">
-            <table class="token-table">
-              <thead>
-                <tr>
-                  <th>SYMBOL</th><th>RATE</th><th>MOVE</th><th>SCORE</th><th>STATUS</th>
-                </tr>
-              </thead>
-              <tbody id="tokenRows"></tbody>
-            </table>
+          <div class="recent-panel glass hud-edge">
+            <div class="panel-head"><h3>RECENT SIGNALS</h3><span class="panel-tag">LIVE</span></div>
+            <div id="recentSignals" class="recent-list"></div>
+          </div>
+
+          <div class="sentiment glass hud-edge">
+            <div class="panel-head"><h3>ENGINE STATUS</h3><span class="panel-tag">AUTO</span></div>
+            <div class="gauge">
+              <div class="gauge-ring"><div class="gauge-core"><span>QUALITY</span><b id="qualityScore">—</b><small>/100</small></div></div>
+            </div>
+            <div class="engine-lines">
+              <div><span>Volume filter</span><b>ON</b></div>
+              <div><span>Breakout/Retest</span><b>ON</b></div>
+              <div><span>Daily + 5M Fib</span><b>ON</b></div>
+              <div><span>Min R:R</span><b>1 : 1.8</b></div>
+            </div>
           </div>
         </section>
 
-        <footer class="footer glass">
-          <span>Delta market data</span>
-          <span>No live chart</span>
-          <span>Daily + 5M Fib Pivot</span>
-          <span>Volume + Breakout/Retest + MTF</span>
-          <span>Lightweight 5s refresh</span>
-        </footer>
+
+        <section class="trade-grid">
+          <div class="trade-ticket glass hud-edge">
+            <div class="panel-head">
+              <h3>MANUAL TRADE EXECUTION</h3>
+              <span id="tradeStatus" class="panel-tag">CHECKING</span>
+            </div>
+
+            <div class="trade-form">
+              <label>
+                Product Symbol
+                <input id="tradeSymbol" placeholder="e.g. BTCUSD or option product symbol">
+              </label>
+              <label>
+                Size
+                <input id="tradeSize" type="number" min="1" step="1" value="1">
+              </label>
+              <label class="check-line">
+                <input id="reduceOnly" type="checkbox">
+                Reduce only
+              </label>
+            </div>
+
+            <div class="trade-actions">
+              <button id="buyBtn" class="btn btn-green">BUY</button>
+              <button id="sellBtn" class="btn btn-red">SELL</button>
+              <button id="reloadPositionsBtn" class="btn btn-soft">↻ POSITIONS</button>
+              <button id="squareAllBtn" class="btn danger">SQUARE OFF ALL</button>
+            </div>
+            <div id="tradeMessage" class="trade-message">Live orders require DELTA_TRADING_ENABLED=true.</div>
+          </div>
+
+          <div class="positions-panel glass hud-edge">
+            <div class="panel-head">
+              <h3>OPEN POSITIONS</h3>
+              <span class="panel-tag">REDUCE-ONLY EXIT</span>
+            </div>
+            <div class="positions-scroll">
+              <table class="positions-table">
+                <thead>
+                  <tr><th>SYMBOL</th><th>SIZE</th><th>ENTRY</th><th>P&L</th><th>ACTION</th></tr>
+                </thead>
+                <tbody id="positionsRows">
+                  <tr><td colspan="5" class="pending">Trading API not loaded yet</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="ticker glass hud-edge">
+          <span class="ticker-label">LIVE TICKER</span>
+          <div class="ticker-track" id="tickerTrack"></div>
+        </section>
       </main>
     </div>
   </div>

@@ -1,12 +1,112 @@
 import os
 import threading
 import time
+import requests
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, request
 
 import signal_engine as eng
+import delta_trading as trade
 
 app = Flask(__name__)
+
+DELTA_BASE_URL = "https://api.india.delta.exchange"
+TICKER_CACHE = {"time": 0.0, "data": {}}
+TICKER_CACHE_SECONDS = 4.0
+
+TOKEN_SYMBOLS = [
+    "SOL","XRP","BNB","ADA","DOGE","AVAX","LINK","LTC","DOT","TRX",
+    "BCH","UNI","ATOM","NEAR","APT","ARB","OP","SUI","FIL","INJ",
+    "ETC","AAVE","MKR","RUNE","SEI","TIA","WIF","PEPE","SHIB","TON",
+    "ICP","HBAR","FET","RENDER","ALGO","GRT","JUP","BONK","PYTH","ENA",
+]
+
+def _num(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+def _ticker_price(row):
+    for key in ("close", "mark_price", "spot_price", "last_price", "price"):
+        val = _num(row.get(key))
+        if val is not None:
+            return val
+    return None
+
+def _ticker_move_pct(row):
+    # Prefer explicit percentage fields if Delta supplies them.
+    for key in (
+        "price_change_24h_pct",
+        "price_change_percent",
+        "change_24h_pct",
+        "percent_change_24h",
+    ):
+        val = _num(row.get(key))
+        if val is not None:
+            return val
+
+    # Tolerant fallback from current and 24h-open/reference values.
+    current = _ticker_price(row)
+    if current is None:
+        return None
+
+    for key in ("open", "open_24h", "price_24h_ago"):
+        base = _num(row.get(key))
+        if base not in (None, 0):
+            return ((current - base) / base) * 100.0
+    return None
+
+def get_public_tickers():
+    now = time.time()
+    if TICKER_CACHE["data"] and now - TICKER_CACHE["time"] < TICKER_CACHE_SECONDS:
+        return TICKER_CACHE["data"]
+
+    try:
+        r = requests.get(
+            f"{DELTA_BASE_URL}/v2/tickers",
+            params={"contract_types": "perpetual_futures"},
+            headers={"Accept": "application/json"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        payload = r.json()
+        rows = payload.get("result", []) if isinstance(payload, dict) else []
+
+        mapped = {}
+        for row in rows:
+            symbol = str(row.get("symbol", "")).upper()
+            if not symbol:
+                continue
+            mapped[symbol] = row
+
+        TICKER_CACHE["time"] = now
+        TICKER_CACHE["data"] = mapped
+        return mapped
+    except Exception:
+        app.logger.exception("Delta public ticker fetch failed")
+        return TICKER_CACHE["data"]
+
+def token_snapshot():
+    tickers = get_public_tickers()
+    result = []
+
+    for index, token in enumerate(TOKEN_SYMBOLS):
+        # Delta perpetuals commonly use TOKENUSD. Also try TOKENUSDT defensively.
+        row = tickers.get(f"{token}USD") or tickers.get(f"{token}USDT")
+        price = _ticker_price(row) if row else None
+        move = _ticker_move_pct(row) if row else None
+
+        result.append({
+            "symbol": token,
+            "group": index // 10 + 1,
+            "rate": price,
+            "move_pct": move,
+            "available": row is not None,
+            "status": "LIVE" if row is not None else "UNAVAILABLE",
+        })
+
+    return result
 
 @app.get("/")
 def index():
@@ -48,6 +148,63 @@ def toggle_asset(asset):
         return jsonify({"error": "Unknown asset"}), 404
     eng.ASSET_ENABLED[asset] = not eng.ASSET_ENABLED[asset]
     return jsonify({"asset": asset, "enabled": eng.ASSET_ENABLED[asset]})
+
+
+@app.get("/api/tokens")
+def api_tokens():
+    return jsonify({
+        "source": "DELTA",
+        "cache_seconds": TICKER_CACHE_SECONDS,
+        "tokens": token_snapshot(),
+    })
+
+
+@app.get("/api/trading/status")
+def api_trading_status():
+    return jsonify(trade.trading_status())
+
+@app.get("/api/positions")
+def api_positions():
+    try:
+        positions = trade.get_positions()
+        return jsonify({"success": True, "positions": positions})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc), "positions": []}), 400
+
+@app.post("/api/order")
+def api_order():
+    data = request.get_json(silent=True) or {}
+    try:
+        result = trade.place_market_order(
+            product_symbol=data.get("product_symbol"),
+            size=data.get("size"),
+            side=data.get("side"),
+            reduce_only=bool(data.get("reduce_only", False)),
+        )
+        return jsonify({"success": True, "result": result})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+@app.post("/api/square-off")
+def api_square_off():
+    data = request.get_json(silent=True) or {}
+    try:
+        result = trade.square_off_position(
+            product_id=data.get("product_id"),
+            product_symbol=data.get("product_symbol"),
+            size=data.get("size"),
+        )
+        return jsonify({"success": True, "result": result})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+@app.post("/api/square-off-all")
+def api_square_off_all():
+    try:
+        result = trade.square_off_all()
+        return jsonify({"success": True, "results": result})
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
 
 def scanner_loop():
     eng.logger.info("Dashboard scanner thread started")

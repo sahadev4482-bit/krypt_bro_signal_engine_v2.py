@@ -22,3 +22,34 @@ UI:
 - Daily + 5M Fib pivots
 - 40-token compact table placeholder
 - TOTP UI placeholder for future trading auth
+
+LOCKED UI + LIVE TOKEN DATA
+- Locked robotic single-screen HUD retained
+- Delta public GET /v2/tickers used for token live rates
+- One backend ticker call cached for 4 seconds
+- 40 tokens shown as 4 groups x 10
+- No 40 separate REST calls
+- Token rate + 24h move (when supplied/derivable) + lightweight movement score/status
+- Token strategy signals are NOT yet the full BTC/ETH/GOLD MTF strategy
+
+SINGLE DEPLOY TRADING LAYER
+
+Render Environment Variables:
+DELTA_API_KEY=<your trading api key>
+DELTA_API_SECRET=<your api secret>
+DELTA_TRADING_ENABLED=false
+
+First deploy with DELTA_TRADING_ENABLED=false.
+Verify Positions/API connectivity.
+Then set DELTA_TRADING_ENABLED=true only when ready for LIVE manual orders.
+
+Features:
+- HMAC-SHA256 signed Delta India REST requests
+- API credentials remain server-side only
+- Manual market BUY / SELL for any valid Delta product symbol
+- Reduce-only checkbox
+- Open positions panel
+- Individual reduce-only Square Off
+- Square Off All using reduce-only market orders
+- TOTP remains UI-only because API-key trading uses signed API credentials
+- No auto-execution from signals
