@@ -8,6 +8,7 @@ import os
 import time
 import math
 import logging
+import json
 import http.server
 import socketserver
 import threading
@@ -62,6 +63,11 @@ MAX_SIGNAL_AGE_SECONDS = int(os.getenv("MAX_SIGNAL_AGE_SECONDS", "360"))
 MIN_ATR_PCT = float(os.getenv("MIN_ATR_PCT", "0.08"))
 MAX_ATR_PCT = float(os.getenv("MAX_ATR_PCT", "2.50"))
 MAX_EMA_EXTENSION_ATR = float(os.getenv("MAX_EMA_EXTENSION_ATR", "1.50"))
+REQUIRE_VOLUME_FOR_SIGNAL = os.getenv("REQUIRE_VOLUME_FOR_SIGNAL", "true").lower() == "true"
+SIGNAL_EXPIRY_CANDLES = int(os.getenv("SIGNAL_EXPIRY_CANDLES", "3"))
+BREAKOUT_LOOKBACK = int(os.getenv("BREAKOUT_LOOKBACK", "6"))
+RETEST_TOLERANCE_ATR = float(os.getenv("RETEST_TOLERANCE_ATR", "0.35"))
+JOURNAL_FILE = os.getenv("JOURNAL_FILE", "signal_journal.jsonl")
 
 # Fib confluence tolerance as % of price
 FIB_NEAR_PCT = float(os.getenv("FIB_NEAR_PCT", "0.20"))
@@ -86,6 +92,7 @@ LAST_SIGNAL = {asset: {"side": None, "time": 0} for asset in ASSETS}
 # This drastically reduces REST load compared with recalculating all
 # 1D/1H/15M/5M data every 20 seconds.
 LAST_PROCESSED_5M_CLOSE = {asset: None for asset in ASSETS}
+PENDING_SIGNALS = {asset: None for asset in ASSETS}
 
 ASSET_ENABLED = {asset: True for asset in ASSETS}
 LATEST_STATUS = {
@@ -611,6 +618,89 @@ def has_new_closed_5m(asset: str) -> bool:
     return True
 
 
+
+def append_signal_journal(record: dict) -> None:
+    """Append one compact JSON line for later performance analysis."""
+    try:
+        with open(JOURNAL_FILE, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, default=str, separators=(",", ":")) + "\n")
+    except Exception:
+        logger.exception("Failed to write signal journal")
+
+
+def breakout_retest_status(df_5m: pd.DataFrame, side: str, atr: float) -> dict:
+    """
+    Simple closed-candle breakout/retest confirmation.
+
+    LONG:
+      - recent close broke above prior local resistance
+      - latest closed candle remains near/above that breakout level
+
+    SHORT:
+      - recent close broke below prior local support
+      - latest closed candle remains near/below that breakout level
+    """
+    now_utc = pd.Timestamp.now(tz="UTC")
+    closed = df_5m[df_5m["close_time"] <= now_utc].copy()
+    need = max(BREAKOUT_LOOKBACK + 2, 8)
+    if len(closed) < need:
+        return {"confirmed": False, "level": None, "reason": "Not enough candles"}
+
+    recent = closed.tail(need)
+    latest = recent.iloc[-1]
+    prev = recent.iloc[-2]
+    base = recent.iloc[-(BREAKOUT_LOOKBACK + 2):-2]
+
+    tolerance = max(atr * RETEST_TOLERANCE_ATR, 1e-9)
+
+    if side == "LONG":
+        level = float(base["high"].max())
+        breakout = float(prev["close"]) > level
+        retest = float(latest["low"]) <= level + tolerance and float(latest["close"]) >= level
+        return {
+            "confirmed": bool(breakout and retest),
+            "level": round(level, 2),
+            "reason": "Breakout + retest confirmed" if breakout and retest else "Waiting breakout/retest",
+        }
+
+    level = float(base["low"].min())
+    breakout = float(prev["close"]) < level
+    retest = float(latest["high"]) >= level - tolerance and float(latest["close"]) <= level
+    return {
+        "confirmed": bool(breakout and retest),
+        "level": round(level, 2),
+        "reason": "Breakdown + retest confirmed" if breakout and retest else "Waiting breakdown/retest",
+    }
+
+
+def pending_signal_gate(asset: str, side: str, setup: dict) -> dict:
+    """
+    Keeps an unconfirmed setup alive for a few closed 5M candles.
+    If not confirmed in SIGNAL_EXPIRY_CANDLES, expire it.
+    """
+    current_close = setup.get("candle_close")
+    pending = PENDING_SIGNALS.get(asset)
+
+    if setup.get("retest_confirmed"):
+        PENDING_SIGNALS[asset] = None
+        return {"allowed": True, "state": "CONFIRMED"}
+
+    if pending is None or pending.get("side") != side:
+        PENDING_SIGNALS[asset] = {
+            "side": side,
+            "first_close": current_close,
+            "age": 1,
+        }
+        return {"allowed": False, "state": "WAITING_RETEST"}
+
+    pending["age"] += 1
+    if pending["age"] > SIGNAL_EXPIRY_CANDLES:
+        PENDING_SIGNALS[asset] = None
+        return {"allowed": False, "state": "EXPIRED"}
+
+    return {"allowed": False, "state": "WAITING_RETEST"}
+
+
 # ============================================================
 # SIGNAL ENGINE
 # ============================================================
@@ -767,6 +857,44 @@ def calculate_signal(asset: str) -> dict | None:
 
     side_fib = fib_context_for_side(side, current_price, daily_fibs, five_min_fibs)
 
+    # High-quality scalping signal requires volume confirmation.
+    if REQUIRE_VOLUME_FOR_SIGNAL and not volume_ok:
+        return {
+            "asset": asset,
+            "status": "NO_TRADE",
+            "reason": "Volume confirmation missing",
+            "price": current_price,
+            "long_score": long_score,
+            "short_score": short_score,
+            "daily_fibs": daily_fibs,
+            "five_min_fibs": five_min_fibs,
+            "confluence": side_fib,
+        }
+
+    atr_now = float(m5["atr"])
+    retest_info = breakout_retest_status(df_5m, side, atr_now)
+    gate = pending_signal_gate(
+        asset,
+        side,
+        {
+            "retest_confirmed": retest_info["confirmed"],
+            "candle_close": str(m5["close_time"]),
+        },
+    )
+
+    if not gate["allowed"]:
+        return {
+            "asset": asset,
+            "status": "NO_TRADE",
+            "reason": f"{gate['state']}: {retest_info['reason']}",
+            "price": current_price,
+            "long_score": long_score,
+            "short_score": short_score,
+            "daily_fibs": daily_fibs,
+            "five_min_fibs": five_min_fibs,
+            "confluence": side_fib,
+        }
+
     # Require at least one directionally meaningful Fib reference.
     if side_fib["daily_name"] is None and side_fib["five_name"] is None:
         return {
@@ -810,7 +938,7 @@ def calculate_signal(asset: str) -> dict | None:
         t3 = current_price - 2.5 * risk
 
     rr_t2 = reward_risk(current_price, stop, t2, side)
-    if rr_t2 < MIN_RR:
+    if rr_t2 + 1e-9 < MIN_RR:
         return {
             "asset": asset,
             "status": "NO_TRADE",
@@ -840,6 +968,8 @@ def calculate_signal(asset: str) -> dict | None:
         "five_min_fibs": five_min_fibs,
         "confluence": side_fib,
         "rr_t2": round(rr_t2, 2),
+        "retest_confirmed": True,
+        "retest_level": retest_info.get("level"),
         "h1_bull": h1_bull,
         "h1_bear": h1_bear,
         "m15_bull": m15_bull,
@@ -994,6 +1124,23 @@ def scan_once() -> None:
                 }
 
             if signal["status"] == "SIGNAL":
+                append_signal_journal({
+                    "time": datetime.now(timezone.utc).isoformat(),
+                    "asset": asset,
+                    "side": signal.get("side"),
+                    "grade": signal_grade(signal.get("score")) if "signal_grade" in globals() else None,
+                    "score": signal.get("score"),
+                    "entry": signal.get("price"),
+                    "sl": signal.get("stop"),
+                    "t1": signal.get("t1"),
+                    "t2": signal.get("t2"),
+                    "t3": signal.get("t3"),
+                    "rr": signal.get("rr_t2"),
+                    "retest_level": signal.get("retest_level"),
+                    "daily_fibs": signal.get("daily_fibs"),
+                    "five_min_fibs": signal.get("five_min_fibs"),
+                })
+
                 logger.info(
                     "%s %s score=%s price=%s",
                     asset,

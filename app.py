@@ -34,7 +34,7 @@ button{border:0;border-radius:10px;padding:11px 16px;font-weight:700;cursor:poin
   <div class="top">
     <div>
       <h1>⚡ KRYPT BRO</h1>
-      <div class="muted">Delta India • 5M closed-candle engine • Min R:R 1:1.8</div>
+      <div class="muted">Delta India • Volume + Breakout/Retest • Min R:R 1:1.8</div>
     </div>
     <span class="badge">SIGNAL FIRST</span>
   </div>

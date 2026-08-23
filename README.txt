@@ -23,3 +23,12 @@ Dashboard v2:
 - Signal grades A+ / A / B / NO TRADE
 - Daily Fib Pivot P, R1-R5, S1-S5
 - 5M Fib Pivot P, R1-R5, S1-S5
+
+V3 ONE-DEPLOY STRATEGY UPDATE
+- R:R floating-point edge fixed
+- MIN_RR default 1.80
+- Volume confirmation mandatory for actionable signal
+- Breakout/Breakdown + retest confirmation
+- Pending setup expires after 3 closed 5M candles
+- JSONL signal journal for later analysis
+- Existing Delta-only, BTC/ETH/GOLD, Daily+5M Fib pivots retained
