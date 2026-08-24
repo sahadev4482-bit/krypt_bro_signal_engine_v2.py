@@ -1052,6 +1052,17 @@ def format_signal(signal: dict) -> str:
 # ============================================================
 
 def should_send_signal(asset: str, side: str) -> bool:
+    # Lifecycle V3.1: while an asset has an unresolved active signal,
+    # never send a second entry signal for that asset.
+    active_map = globals().get("ACTIVE_SIGNALS", {})
+    active = active_map.get(asset) if isinstance(active_map, dict) else None
+    if active:
+        logger.info(
+            "%s %s Telegram entry blocked: lifecycle signal still %s",
+            asset, side, active.get("status", "ACTIVE")
+        )
+        return False
+
     now = time.time()
     previous = LAST_SIGNAL[asset]
 
@@ -1183,3 +1194,227 @@ if __name__ == "__main__":
     threading.Thread(target=run_health_server, daemon=True).start()
     threading.Thread(target=keep_alive_ping, daemon=True).start()
     main()
+
+# ============================================================
+# STRATEGY V3 LIFECYCLE / PERFORMANCE EXTENSION
+# ============================================================
+# One active signal per asset. A later NO_TRADE scan never overwrites an
+# active signal. Lifecycle: ACTIVE -> T1_HIT -> T2_HIT -> T3_HIT / SL_HIT.
+ACTIVE_SIGNALS = {asset: None for asset in ASSETS}
+SIGNAL_HISTORY = []
+MAX_HISTORY = int(os.getenv("MAX_SIGNAL_HISTORY", "100"))
+STATE_LOCK = threading.RLock()
+
+
+def _utcnow():
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _event(record: dict):
+    rec = dict(record)
+    rec.setdefault("time", _utcnow())
+    SIGNAL_HISTORY.insert(0, rec)
+    del SIGNAL_HISTORY[MAX_HISTORY:]
+    append_signal_journal(rec)
+
+
+def register_active_signal(signal: dict) -> bool:
+    asset = signal["asset"]
+    with STATE_LOCK:
+        if ACTIVE_SIGNALS.get(asset):
+            logger.info("%s %s blocked: active signal already open", asset, signal.get("side"))
+            return False
+        rec = {
+            "asset": asset, "side": signal["side"], "status": "ACTIVE",
+            "score": signal["score"], "grade": signal_grade(signal["score"]),
+            "entry": signal["price"], "current": signal["price"],
+            "sl": signal["stop"], "t1": signal["t1"], "t2": signal["t2"], "t3": signal["t3"],
+            "rr": signal.get("rr_t2"), "opened_at": _utcnow(), "updated_at": _utcnow(),
+            "t1_hit": False, "t2_hit": False, "t3_hit": False, "r_multiple": 0.0,
+        }
+        ACTIVE_SIGNALS[asset] = rec
+        _event({**rec, "event": "OPEN"})
+        return True
+
+
+def _r_multiple(s, price):
+    risk = abs(float(s["entry"]) - float(s["sl"]))
+    if risk <= 0: return 0.0
+    move = (price - s["entry"]) if s["side"] == "LONG" else (s["entry"] - price)
+    return round(move / risk, 3)
+
+
+def update_active_signal_bar(asset: str, high: float, low: float, close: float):
+    """
+    Update an active signal from a fully closed 5M candle.
+
+    IMPORTANT:
+    - Target/SL detection uses candle HIGH/LOW, not only the closing price.
+    - If both SL and a target are touched inside the same candle and intrabar
+      ordering is unknown, use the conservative assumption: SL first.
+    """
+    with STATE_LOCK:
+        s = ACTIVE_SIGNALS.get(asset)
+        if not s:
+            return
+
+        high = float(high)
+        low = float(low)
+        close = float(close)
+
+        s["current"] = close
+        s["updated_at"] = _utcnow()
+        s["r_multiple"] = _r_multiple(s, close)
+
+        is_long = s["side"] == "LONG"
+
+        if is_long:
+            sl_hit = low <= float(s["sl"])
+            t1_hit = high >= float(s["t1"])
+            t2_hit = high >= float(s["t2"])
+            t3_hit = high >= float(s["t3"])
+        else:
+            sl_hit = high >= float(s["sl"])
+            t1_hit = low <= float(s["t1"])
+            t2_hit = low <= float(s["t2"])
+            t3_hit = low <= float(s["t3"])
+
+        # Conservative handling for a candle that contains both stop and target.
+        if sl_hit:
+            s["status"] = "SL_HIT"
+            s["current"] = float(s["sl"])
+            s["r_multiple"] = -1.0
+            logger.info(
+                "%s %s SL HIT | entry=%s sl=%s candle_high=%s candle_low=%s",
+                asset, s["side"], s["entry"], s["sl"], high, low
+            )
+            _event({**s, "event": "SL_HIT"})
+            _event({**s, "event": "CLOSE", "closed_at": _utcnow()})
+            ACTIVE_SIGNALS[asset] = None
+            send_telegram_alert(
+                f"🛑 <b>KRYPT BRO • {asset} {s['side']} SL HIT</b>\\n"
+                f"Entry: <b>${s['entry']:,.2f}</b>\\n"
+                f"SL: <b>${s['sl']:,.2f}</b>\\n"
+                f"Result: <b>-1.00R</b>"
+            )
+            return
+
+        targets = (
+            ("t1_hit", t1_hit, "T1_HIT", s["t1"]),
+            ("t2_hit", t2_hit, "T2_HIT", s["t2"]),
+            ("t3_hit", t3_hit, "T3_HIT", s["t3"]),
+        )
+
+        for key, hit, label, level in targets:
+            if hit and not s[key]:
+                s[key] = True
+                s["status"] = label
+                # R at exact target level is more meaningful than candle close.
+                s["r_multiple"] = _r_multiple(s, float(level))
+                logger.info(
+                    "%s %s %s | entry=%s target=%s candle_high=%s candle_low=%s",
+                    asset, s["side"], label, s["entry"], level, high, low
+                )
+                _event({**s, "event": label})
+                send_telegram_alert(
+                    f"🎯 <b>KRYPT BRO • {asset} {s['side']} {label.replace('_',' ')}</b>\\n"
+                    f"Entry: <b>${s['entry']:,.2f}</b>\\n"
+                    f"Target: <b>${float(level):,.2f}</b>\\n"
+                    f"Result: <b>{s['r_multiple']:+.2f}R</b>"
+                )
+
+        if t3_hit:
+            s["status"] = "T3_HIT"
+            s["current"] = float(s["t3"])
+            s["r_multiple"] = _r_multiple(s, float(s["t3"]))
+            _event({**s, "event": "CLOSE", "closed_at": _utcnow()})
+            ACTIVE_SIGNALS[asset] = None
+
+
+def update_active_signal(asset: str, price: float):
+    """Compatibility helper for callers that only have one price."""
+    update_active_signal_bar(asset, price, price, price)
+
+
+def active_signal_snapshot():
+    with STATE_LOCK: return {k:(dict(v) if v else None) for k,v in ACTIVE_SIGNALS.items()}
+
+
+def signal_history(limit=30):
+    with STATE_LOCK: return [dict(x) for x in SIGNAL_HISTORY[:max(1,min(int(limit),100))]]
+
+
+def performance_stats():
+    closed = [x for x in SIGNAL_HISTORY if x.get("event") == "CLOSE"]
+    if not closed: return {"closed":0,"wins":0,"losses":0,"win_rate":None,"total_r":0.0,"avg_r":None}
+    rs = [float(x.get("r_multiple",0)) for x in closed]
+    wins = sum(r > 0 for r in rs); losses = sum(r <= 0 for r in rs)
+    return {"closed":len(rs),"wins":wins,"losses":losses,"win_rate":round(wins/len(rs)*100,1),"total_r":round(sum(rs),2),"avg_r":round(sum(rs)/len(rs),2)}
+
+# Wrap original scanner so lifecycle prices are checked every loop and new
+# signals are locked before Telegram delivery. Existing strategy calculation
+# remains unchanged.
+_original_scan_once = scan_once
+
+def scan_once() -> None:
+    # Update active signals from lightweight latest 5M/public data first.
+    for asset in ASSETS:
+        try:
+            c = get_latest_closed_5m(asset)
+            if c is not None:
+                update_active_signal_bar(
+                    asset,
+                    high=float(c["high"]),
+                    low=float(c["low"]),
+                    close=float(c["close"]),
+                )
+        except Exception:
+            logger.exception("Lifecycle price update failed for %s", asset)
+
+    # Temporarily intercept duplicate sends: the original scanner may produce
+    # SIGNAL, then we reconcile it into ACTIVE state below.
+    before = {a: LATEST_STATUS[a].get("updated_at") for a in ASSETS}
+    _original_scan_once()
+    for asset in ASSETS:
+        l = LATEST_STATUS[asset]
+        changed = l.get("updated_at") != before.get(asset)
+
+        if changed and l.get("status") == "SIGNAL":
+            sig = {
+                "asset": asset,
+                "side": l.get("side"),
+                "score": l.get("score"),
+                "price": l.get("price"),
+                "stop": l.get("stop"),
+                "t1": l.get("t1"),
+                "t2": l.get("t2"),
+                "t3": l.get("t3"),
+                "rr_t2": l.get("rr"),
+            }
+            if ACTIVE_SIGNALS.get(asset) is None:
+                registered = register_active_signal(sig)
+                if registered:
+                    logger.info(
+                        "%s %s lifecycle OPEN | entry=%s sl=%s t1=%s t2=%s t3=%s",
+                        asset, sig["side"], sig["price"], sig["stop"],
+                        sig["t1"], sig["t2"], sig["t3"]
+                    )
+
+        # Always preserve active lifecycle on the dashboard, even if the
+        # strategy scanner did not run or just returned NO_TRADE.
+        s = ACTIVE_SIGNALS.get(asset)
+        if s:
+            LATEST_STATUS[asset].update({
+                "status": s["status"],
+                "side": s["side"],
+                "score": s["score"],
+                "grade": s["grade"],
+                "price": s["current"],
+                "stop": s["sl"],
+                "t1": s["t1"],
+                "t2": s["t2"],
+                "t3": s["t3"],
+                "rr": s["rr"],
+                "reason": f"ACTIVE • {s['r_multiple']:+.2f}R",
+                "updated_at": s["updated_at"],
+            })

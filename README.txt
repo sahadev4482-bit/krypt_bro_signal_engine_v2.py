@@ -66,3 +66,25 @@ CORRECTED FULL RELEASE
 - Square Off All retained
 - BTC/ETH/GOLD strategy retained
 - 40-token Delta ticker groups retained
+
+
+STRATEGY V3.1 TRACKER FIX
+- Recent Signals panel now uses ONLY /api/signals/history lifecycle events.
+- NO_TRADE scans can no longer overwrite Recent Signals.
+- Active signal count comes from server ACTIVE_SIGNALS.
+- Target/SL detection uses completed 5M candle HIGH/LOW, not close only.
+- Conservative same-candle rule: if SL and target both touch, SL is counted first.
+- Telegram sends T1/T2/T3 and SL lifecycle updates.
+- Duplicate new entry Telegram signals are blocked while an asset is ACTIVE.
+- Active dashboard cards remain ACTIVE/T1_HIT/T2_HIT until T3 or SL closes them.
+- Lifecycle state is in server memory. A Render redeploy/restart starts a fresh lifecycle session.
+
+V3.2 DELTA TICK STREAM
+- One public Delta WebSocket connection: wss://public-socket.india.delta.exchange
+- Subscribes to trades for BTCUSD, ETHUSD, PAXGUSD.
+- Full strategy STILL runs only on newly closed 5M candles.
+- Tick stream updates current rate + active signal TP/SL lifecycle only.
+- Browser reads in-memory live cache every 350ms; it does NOT hit Delta every 350ms.
+- WebSocket auto reconnects with backoff and protocol ping/pong.
+- Existing 40-token table keeps low-load cached REST behavior.
+- UI shows WS LIVE / RECONNECTING and TICK LIVE / REST FALLBACK.

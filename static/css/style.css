@@ -318,3 +318,16 @@ body{
 @media(prefers-reduced-motion:reduce){
   .hud-edge:after,.asset-icon:after{animation:none!important}
 }
+
+/* V3 token/meme emblems + active lifecycle polish */
+.token-cell{display:flex;align-items:center;gap:8px}.token-emblem{width:24px;height:24px;border-radius:50%;display:inline-grid;place-items:center;font-weight:900;font-size:12px;background:radial-gradient(circle at 30% 25%,#e8fbff,#27d7ff 38%,#0754bd 72%);box-shadow:0 0 12px rgba(36,220,255,.7),inset 0 0 8px rgba(255,255,255,.45);color:#032b66;border:1px solid rgba(255,255,255,.65)}.token-emblem.meme{font-size:15px;background:radial-gradient(circle at 30% 25%,#fff8b6,#34e8ff 48%,#0872d9)}
+.status.signal,.status.active,.status.t1_hit,.status.t2_hit,.status.t3_hit{color:#35f5a0;text-shadow:0 0 12px rgba(53,245,160,.7)}
+
+.live-price{font-variant-numeric:tabular-nums}
+.tick-flash{animation:tickFlash .28s ease-out}
+@keyframes tickFlash{
+  0%{color:#ffffff;text-shadow:0 0 0 transparent}
+  45%{color:#52f4ff;text-shadow:0 0 16px rgba(40,226,255,.95)}
+  100%{color:#ffffff;text-shadow:0 0 0 transparent}
+}
+@media(prefers-reduced-motion:reduce){.tick-flash{animation:none!important}}

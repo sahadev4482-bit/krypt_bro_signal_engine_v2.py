@@ -7,6 +7,7 @@ from flask import Flask, jsonify, render_template, request
 
 import signal_engine as eng
 import delta_trading as trade
+import delta_ws
 
 app = Flask(__name__)
 
@@ -122,6 +123,8 @@ def api_status():
         "scanner_enabled": eng.SCANNER_ENABLED,
         "telegram_enabled": eng.TELEGRAM_ENABLED,
         "min_rr": eng.MIN_RR,
+        "active_signals": eng.active_signal_snapshot(),
+        "performance": eng.performance_stats(),
         "assets": {
             asset: {
                 "enabled": eng.ASSET_ENABLED[asset],
@@ -130,6 +133,11 @@ def api_status():
             for asset in eng.ASSETS
         },
     })
+
+
+@app.get("/api/signals/history")
+def api_signal_history():
+    return jsonify({"signals": eng.signal_history(request.args.get("limit", 30)), "performance": eng.performance_stats()})
 
 @app.post("/api/toggle-scanner")
 def toggle_scanner():
@@ -206,6 +214,12 @@ def api_square_off_all():
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 
+
+@app.get("/api/live")
+def api_live():
+    """Fast in-memory quote endpoint fed by one Delta public WebSocket."""
+    return jsonify(delta_ws.snapshot())
+
 def scanner_loop():
     eng.logger.info("Dashboard scanner thread started")
     while True:
@@ -216,6 +230,7 @@ def scanner_loop():
         time.sleep(eng.SCAN_INTERVAL_SECONDS)
 
 if __name__ == "__main__":
+    delta_ws.start()
     threading.Thread(target=scanner_loop, daemon=True).start()
     threading.Thread(target=eng.keep_alive_ping, daemon=True).start()
     port = int(os.getenv("PORT", "8080"))

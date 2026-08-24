@@ -25,6 +25,12 @@ function pivotTable(p){
   return '<div class="pivot">'+order.map(k=>`<div class="row"><span>${k}</span><b>${fmt(p[k])}</b></div>`).join('')+'</div>'
 }
 
+function tokenEmblem(sym){
+  const meme={DOGE:'🐕',SHIB:'🐶',PEPE:'🐸',WIF:'🐕',BONK:'🐕'};
+  const core={BTC:'₿',ETH:'◆',SOL:'S',XRP:'X',BNB:'B',ADA:'A',GOLD:'Au'};
+  return `<span class="token-emblem ${meme[sym]?'meme':''}">${meme[sym]||core[sym]||sym.slice(0,1)}</span>`;
+}
+
 function tokenStatus(move){
   if(move===null || move===undefined) return {label:'NO DATA', cls:'pending', score:'—'};
   const abs=Math.abs(move);
@@ -46,7 +52,7 @@ async function renderTokenGroup(){
         : `${t.move_pct>=0?'+':''}${Number(t.move_pct).toFixed(2)}%`;
 
       return `<tr>
-        <td>${t.symbol}</td>
+        <td><span class="token-cell">${tokenEmblem(t.symbol)}<b>${t.symbol}</b></span></td>
         <td>${t.rate===null||t.rate===undefined?'—':fmt(t.rate)}</td>
         <td class="${t.move_pct>0?'side-long':t.move_pct<0?'side-short':'pending'}">${move}</td>
         <td>${status.score}</td>
@@ -104,7 +110,6 @@ async function refresh(){
     if(asset==='BTC')topBTC.textContent=fmt(l.price);
     if(asset==='ETH')topETH.textContent=fmt(l.price);
     if(asset==='GOLD')topGOLD.textContent=fmt(l.price);
-    addRecent(asset,l);
 
     html+=`<article class="card glass hud-edge">
       <div class="card-head">
@@ -115,7 +120,7 @@ async function refresh(){
       <div class="row"><span>Side</span><b>${l.side||'—'}</b></div>
       <div class="row"><span>Score / Grade</span><b>${l.score??'—'} / ${l.grade||'—'}</b></div>
       <div class="row"><span>R:R (to T2)</span><b>${l.rr?'1 : '+Number(l.rr).toFixed(2):'—'}</b></div>
-      <div class="row"><span>Price</span><b>${fmt(l.price)}</b></div>
+      <div class="row"><span>Live Price</span><b class="live-price" data-live-price="${asset}">${fmt(l.price)}</b></div>
       <div class="row"><span>SL</span><b>${fmt(l.stop)}</b></div>
       <div class="row"><span>T1 / T2 / T3</span><b>${fmt(l.t1)} / ${fmt(l.t2)} / ${fmt(l.t3)}</b></div>
       <div class="reason">${l.reason||'VALID SIGNAL SETUP'}</div>
@@ -124,7 +129,13 @@ async function refresh(){
     </article>`;
   }
   cards.innerHTML=html;
-  activeSignals.textContent=active;highGrade.textContent=high;qualityScore.textContent=count?Math.round(quality/count):'—';
+  const serverActive = d.active_signals
+    ? Object.values(d.active_signals).filter(Boolean).length
+    : active;
+  activeSignals.textContent=serverActive;
+  highGrade.textContent=high;
+  qualityScore.textContent=count?Math.round(quality/count):'—';
+  if(d.performance && d.performance.win_rate!==null){ qualityScore.textContent=Math.round(d.performance.win_rate); }
 
   document.querySelectorAll('[data-asset]').forEach(btn=>btn.addEventListener('click',async()=>{
     await api('/api/toggle-asset/'+btn.dataset.asset,{method:'POST'});refresh()
@@ -143,9 +154,33 @@ master.addEventListener('click',async()=>{await api('/api/toggle-scanner',{metho
 tg.addEventListener('click',async()=>{await api('/api/toggle-telegram',{method:'POST'});refresh()});
 refreshBtn.addEventListener('click',refresh);
 pauseBtn.addEventListener('click',()=>{uiPaused=!uiPaused;pauseBtn.textContent=uiPaused?'▶ RESUME UI':'Ⅱ PAUSE UI'});
+async function loadSignalHistory(){
+  try{
+    const d=await api('/api/signals/history?limit=20');
+    const allowed=new Set(['OPEN','T1_HIT','T2_HIT','T3_HIT','SL_HIT','CLOSE']);
+    const rows=(d.signals||[]).filter(x=>allowed.has(x.event)).slice(0,8);
+
+    recentSignals.innerHTML=rows.length
+      ? rows.map(x=>{
+          let label=x.event;
+          if(x.event==='OPEN') label='ACTIVE';
+          if(x.event==='CLOSE') label=x.status||'CLOSED';
+          return `<div class="recent-item">
+            <span>${tokenEmblem(x.asset)} ${x.asset}</span>
+            <b class="${x.side==='LONG'?'side-long':'side-short'}">${x.side||'—'}</b>
+            <span class="status-text">${label}</span>
+            <b>${x.score??'—'}</b>
+          </div>`;
+        }).join('')
+      : '<div class="pending">No lifecycle signal recorded since this server started</div>';
+  }catch(e){
+    recentSignals.innerHTML='<div class="pending">Signal history API unavailable</div>';
+  }
+}
 renderTokenGroup();
+loadSignalHistory();
 refresh();
-setInterval(refresh,5000);
+setInterval(()=>{refresh();loadSignalHistory();},5000);
 
 
 async function loadTradingStatus(){
