@@ -236,99 +236,111 @@ def api_square_off_all():
 
 def _ai_context():
     """
-    Sanitized read-only application context.
-    Deliberately excludes every credential / secret / token.
-    """
-    live = delta_ws.snapshot()
-    status_data = eng.dashboard_snapshot()
-    performance = analytics.summary()
+    Sanitized read-only application context for Ox Alpha.
 
+    IMPORTANT:
+    - No API keys, API secrets, Telegram tokens, passwords or environment
+      variables are exposed to the AI provider.
+    - AI receives market/signal/performance/position summaries only.
+    - AI has no order-execution permission.
+    """
+
+    # Live public Delta WebSocket snapshot.
+    live = delta_ws.snapshot()
+
+    # Build signal-engine context only from attributes/functions that exist.
+    assets_context = {}
+    for asset in getattr(eng, "ASSETS", []):
+        latest = {}
+        try:
+            latest = dict(getattr(eng, "LATEST_STATUS", {}).get(asset, {}) or {})
+        except Exception:
+            latest = {}
+
+        assets_context[asset] = {
+            "enabled": bool(getattr(eng, "ASSET_ENABLED", {}).get(asset, True)),
+            "latest": latest,
+        }
+
+    # Active signals.
+    active_signals = []
+    try:
+        if hasattr(eng, "active_signal_snapshot"):
+            active_signals = eng.active_signal_snapshot()
+        else:
+            active_signals = []
+    except Exception as exc:
+        app.logger.warning("AI context active_signal_snapshot failed: %s", exc)
+        active_signals = []
+
+    # Engine performance stats.
+    engine_performance = {}
+    try:
+        if hasattr(eng, "performance_stats"):
+            engine_performance = eng.performance_stats()
+    except Exception as exc:
+        app.logger.warning("AI context performance_stats failed: %s", exc)
+        engine_performance = {}
+
+    status_data = {
+        "scanner_enabled": bool(getattr(eng, "SCANNER_ENABLED", True)),
+        "telegram_enabled": bool(getattr(eng, "TELEGRAM_ENABLED", True)),
+        "min_rr": getattr(eng, "MIN_RR", None),
+        "active_signals": active_signals,
+        "performance": engine_performance,
+        "assets": assets_context,
+    }
+
+    # Persistent analytics/backtest summary.
+    performance = {}
+    try:
+        performance = analytics.summary()
+    except Exception as exc:
+        app.logger.warning("AI context analytics summary failed: %s", exc)
+        performance = {}
+
+    # Private positions are optional. Failure must never break AI chat.
     positions = []
     positions_error = None
     try:
         if trade.credentials_configured():
-            positions = trade.get_positions()
+            raw_positions = trade.get_positions() or []
+            for p in raw_positions:
+                if not isinstance(p, dict):
+                    continue
+                positions.append({
+                    "product_symbol": p.get("product_symbol") or p.get("symbol"),
+                    "size": p.get("size"),
+                    "entry_price": p.get("entry_price"),
+                    "mark_price": p.get("mark_price"),
+                    "unrealized_pnl": p.get("unrealized_pnl", p.get("unrealised_pnl")),
+                })
     except Exception as exc:
-        positions_error = str(exc)[:180]
-
-    safe_positions = []
-    for p in positions or []:
-        safe_positions.append({
-            "product_symbol": p.get("product_symbol"),
-            "size": p.get("size"),
-            "entry_price": p.get("entry_price"),
-            "mark_price": p.get("mark_price"),
-            "unrealized_pnl": p.get("unrealized_pnl", p.get("unrealised_pnl")),
-        })
+        # Delta IP-whitelist / auth errors should be shown as context only,
+        # not returned as an HTTP 400 for AI chat.
+        positions_error = str(exc)[:240]
+        app.logger.warning("AI context positions unavailable: %s", exc)
 
     return {
         "live_market": live,
         "signal_engine": status_data,
-        "performance": performance,
-        "positions": safe_positions,
+        "analytics": performance,
+        "positions": positions,
         "positions_error": positions_error,
         "trading": {
             "credentials_configured": trade.credentials_configured(),
-            "execution_enabled": bool(trade.TRADING_ENABLED),
+            "runtime_enabled": bool(globals().get("TRADING_RUNTIME_ENABLED", False)),
+            "environment_execution_enabled": bool(getattr(trade, "TRADING_ENABLED", False)),
             "ai_execution_permission": False,
         },
         "security": {
             "api_keys_in_context": False,
             "api_secrets_in_context": False,
             "telegram_token_in_context": False,
+            "totp_secret_in_context": False,
         },
     }
 
-
-
-@app.get("/api/system/diagnostics")
-def api_system_diagnostics():
-    ws = delta_ws.snapshot()
-    ai = ai_assistant.status()
-    return jsonify({
-        "delta_ws_connected": bool(ws.get("connected")),
-        "delta_ws_last_message_at": ws.get("last_message_at"),
-        "delta_ws_last_error": ws.get("last_error"),
-        "ai": ai,
-        "telegram_enabled": bool(getattr(eng, "TELEGRAM_ENABLED", True)),
-        "scanner_enabled": bool(getattr(eng, "SCANNER_ENABLED", True)),
-        "trading_credentials": trade.credentials_configured(),
-        "trading_enabled": bool(TRADING_RUNTIME_ENABLED),
-        "other_token_master": OTHER_TOKEN_MASTER,
-        "token_groups": TOKEN_GROUP_STATE,
-    })
-
-@app.post("/api/trading/toggle")
-def api_trading_toggle():
-    global TRADING_RUNTIME_ENABLED
-    data = request.get_json(silent=True) or {}
-    enabled = bool(data.get("enabled"))
-    if enabled and not trade.credentials_configured():
-        return jsonify({"success": False, "error": "Delta trading credentials are not configured."}), 400
-    TRADING_RUNTIME_ENABLED = enabled
-    return jsonify({"success": True, "enabled": TRADING_RUNTIME_ENABLED})
-
-
-@app.get("/api/trading/status")
-def api_trading_status():
-    return jsonify({
-        "success": True,
-        "enabled": bool(TRADING_RUNTIME_ENABLED),
-        "credentials_configured": trade.credentials_configured()
-    })
-
-@app.post("/api/tokens/master")
-def api_token_master():
-    global OTHER_TOKEN_MASTER
-    OTHER_TOKEN_MASTER = not OTHER_TOKEN_MASTER
-    return jsonify({"success": True, "enabled": OTHER_TOKEN_MASTER})
-
-@app.post("/api/tokens/group/<group_id>")
-def api_token_group(group_id):
-    if group_id not in TOKEN_GROUP_STATE:
-        return jsonify({"success": False, "error": "Invalid group"}), 400
-    TOKEN_GROUP_STATE[group_id] = not TOKEN_GROUP_STATE[group_id]
-    return jsonify({"success": True, "group": group_id, "enabled": TOKEN_GROUP_STATE[group_id]})
 
 @app.get("/api/ai/status")
 def api_ai_status():
@@ -345,11 +357,19 @@ def api_ai_chat():
         return jsonify({"success": False, "error": "Message is required."}), 400
 
     try:
+        context = _ai_context()
+        app.logger.info(
+            "AI CHAT REQUEST | model=%s | live_connected=%s | active_signals=%s",
+            ai_assistant.AI_MODEL,
+            bool((context.get("live_market") or {}).get("connected")),
+            len((context.get("signal_engine") or {}).get("active_signals") or []),
+        )
         answer = ai_assistant.ask(
             message=message,
-            context=_ai_context(),
+            context=context,
             history=history if isinstance(history, list) else [],
         )
+        app.logger.info("AI CHAT SUCCESS | model=%s", ai_assistant.AI_MODEL)
         return jsonify({
             "success": True,
             "answer": answer,
@@ -357,6 +377,7 @@ def api_ai_chat():
             "mode": "READ_ONLY",
         })
     except Exception as exc:
+        app.logger.exception("AI CHAT FAILED")
         return jsonify({"success": False, "error": str(exc)}), 400
 
 @app.get("/api/performance")
