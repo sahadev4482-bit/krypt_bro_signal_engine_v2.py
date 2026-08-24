@@ -88,3 +88,33 @@ V3.2 DELTA TICK STREAM
 - WebSocket auto reconnects with backoff and protocol ping/pong.
 - Existing 40-token table keeps low-load cached REST behavior.
 - UI shows WS LIVE / RECONNECTING and TICK LIVE / REST FALLBACK.
+
+V3.3 DATA COLLECTION / BACKTEST FOUNDATION
+- Every lifecycle OPEN/T1/T2/T3/SL event is appended to data/signal_events.jsonl.
+- Every completed T3 or SL trade is appended to data/closed_trades.csv.
+- /api/performance reports trade count, win rate, average R, profit factor,
+  T1/T2/T3 hit rates and per-asset results.
+- /api/research/trades exposes the collected closed-trade journal.
+- backtest.py validates historical OHLCV CSV datasets.
+IMPORTANT: Render ephemeral filesystem can be lost on restart/redeploy. For a durable
+long-term dataset, use an external persistent database/store before relying on this
+journal for months of research.
+
+V3.4 OX ALPHA AI ASSISTANT
+Render environment variables:
+OPENROUTER_API_KEY=<your OpenRouter key>
+AI_MODEL=stealth/ox-alpha
+AI_CHAT_ENABLED=true
+APP_PUBLIC_URL=https://krypt-bro-signal-engine-v2-py.onrender.com
+
+Security:
+- Delta API key/secret are NEVER sent to the AI.
+- Telegram bot token is NEVER sent to the AI.
+- AI receives sanitized live market, signal, lifecycle, positions summary and performance context only.
+- AI order execution permission is hard-coded OFF in this release.
+- AI failure does not stop the scanner, WebSocket, Telegram, or trading backend.
+
+UI:
+- Bottom-right glowing AI orb.
+- Floating chat panel, Malayalam/English.
+- Quick questions for BTC / strongest setup / active signal explanation.

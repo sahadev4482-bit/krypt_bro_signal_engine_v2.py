@@ -8,6 +8,8 @@ from flask import Flask, jsonify, render_template, request
 import signal_engine as eng
 import delta_trading as trade
 import delta_ws
+import analytics_store as analytics
+import ai_assistant
 
 app = Flask(__name__)
 
@@ -214,6 +216,91 @@ def api_square_off_all():
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 400
 
+
+
+
+def _ai_context():
+    """
+    Sanitized read-only application context.
+    Deliberately excludes every credential / secret / token.
+    """
+    live = delta_ws.snapshot()
+    status_data = eng.dashboard_snapshot()
+    performance = analytics.summary()
+
+    positions = []
+    positions_error = None
+    try:
+        if trade.credentials_configured():
+            positions = trade.get_positions()
+    except Exception as exc:
+        positions_error = str(exc)[:180]
+
+    safe_positions = []
+    for p in positions or []:
+        safe_positions.append({
+            "product_symbol": p.get("product_symbol"),
+            "size": p.get("size"),
+            "entry_price": p.get("entry_price"),
+            "mark_price": p.get("mark_price"),
+            "unrealized_pnl": p.get("unrealized_pnl", p.get("unrealised_pnl")),
+        })
+
+    return {
+        "live_market": live,
+        "signal_engine": status_data,
+        "performance": performance,
+        "positions": safe_positions,
+        "positions_error": positions_error,
+        "trading": {
+            "credentials_configured": trade.credentials_configured(),
+            "execution_enabled": bool(trade.TRADING_ENABLED),
+            "ai_execution_permission": False,
+        },
+        "security": {
+            "api_keys_in_context": False,
+            "api_secrets_in_context": False,
+            "telegram_token_in_context": False,
+        },
+    }
+
+
+@app.get("/api/ai/status")
+def api_ai_status():
+    return jsonify(ai_assistant.status())
+
+
+@app.post("/api/ai/chat")
+def api_ai_chat():
+    data = request.get_json(silent=True) or {}
+    message = str(data.get("message", "")).strip()
+    history = data.get("history") or []
+
+    if not message:
+        return jsonify({"success": False, "error": "Message is required."}), 400
+
+    try:
+        answer = ai_assistant.ask(
+            message=message,
+            context=_ai_context(),
+            history=history if isinstance(history, list) else [],
+        )
+        return jsonify({
+            "success": True,
+            "answer": answer,
+            "model": ai_assistant.AI_MODEL,
+            "mode": "READ_ONLY",
+        })
+    except Exception as exc:
+        return jsonify({"success": False, "error": str(exc)}), 400
+
+@app.get("/api/performance")
+def api_performance():
+    return jsonify(analytics.summary())
+
+@app.get("/api/research/trades")
+def api_research_trades():
+    return jsonify({"trades": analytics.read_trades(limit=1000)})
 
 @app.get("/api/live")
 def api_live():

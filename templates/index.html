@@ -178,5 +178,36 @@
   </div>
 
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+    <button id="aiOrb" class="ai-orb" aria-label="Open AI Assistant">AI</button>
+
+    <section id="aiPanel" class="ai-panel glass" aria-hidden="true">
+      <div class="ai-head">
+        <div>
+          <b>OX ALPHA • KRYPT BRO AI</b>
+          <small id="aiMode">READ-ONLY LIVE CONTEXT</small>
+        </div>
+        <button id="aiClose" class="ai-close">×</button>
+      </div>
+
+      <div id="aiMessages" class="ai-messages">
+        <div class="ai-msg assistant">
+          Ask about BTC, ETH, GOLD, current signal state, Fib levels, recent results, or why a trade is NO_TRADE.
+        </div>
+      </div>
+
+      <div class="ai-suggestions">
+        <button data-ai-q="BTC ഇപ്പോൾ എന്തുകൊണ്ട് trade ഇല്ല?">BTC WHY?</button>
+        <button data-ai-q="Which of BTC, ETH and GOLD has the strongest current setup?">BEST SETUP</button>
+        <button data-ai-q="Explain the latest active signal and its risk levels.">SIGNAL EXPLAIN</button>
+      </div>
+
+      <div class="ai-input-row">
+        <textarea id="aiInput" rows="2" placeholder="Ask KRYPT BRO AI..."></textarea>
+        <button id="aiSend" class="btn btn-cyan">SEND</button>
+      </div>
+      <div id="aiStatusLine" class="ai-status-line">AI execution permission: OFF</div>
+    </section>
+
 </body>
 </html>

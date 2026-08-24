@@ -314,3 +314,75 @@ squareAllBtn.addEventListener('click',async()=>{
 loadTradingStatus();
 loadPositions();
 setInterval(loadPositions,15000);
+
+
+// ===== OX ALPHA / KRYPT BRO READ-ONLY AI CHAT =====
+const aiOrb=document.getElementById('aiOrb');
+const aiPanel=document.getElementById('aiPanel');
+const aiClose=document.getElementById('aiClose');
+const aiInput=document.getElementById('aiInput');
+const aiSend=document.getElementById('aiSend');
+const aiMessages=document.getElementById('aiMessages');
+const aiStatusLine=document.getElementById('aiStatusLine');
+const aiMode=document.getElementById('aiMode');
+let aiHistory=[];
+
+function aiAdd(role,text,extra=''){
+  const el=document.createElement('div');
+  el.className=`ai-msg ${role} ${extra}`.trim();
+  el.textContent=text;
+  aiMessages.appendChild(el);
+  aiMessages.scrollTop=aiMessages.scrollHeight;
+}
+
+async function aiCheckStatus(){
+  try{
+    const s=await api('/api/ai/status');
+    if(aiMode) aiMode.textContent=s.configured?`${s.model} • READ-ONLY`:'API KEY NOT CONFIGURED';
+    if(aiStatusLine) aiStatusLine.textContent=s.configured
+      ? 'Live app context: ON • AI order execution: OFF'
+      : 'Set OPENROUTER_API_KEY in Render • AI order execution: OFF';
+  }catch(e){}
+}
+
+async function aiAsk(prefill=null){
+  const message=(prefill!==null?prefill:aiInput.value).trim();
+  if(!message) return;
+  if(prefill===null) aiInput.value='';
+
+  aiAdd('user',message);
+  aiHistory.push({role:'user',content:message});
+  aiSend.disabled=true;
+  aiStatusLine.textContent='Reading current KRYPT BRO context and asking AI...';
+
+  try{
+    const r=await fetch('/api/ai/chat',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({message,history:aiHistory.slice(-6)})
+    });
+    const d=await r.json();
+    if(!d.success) throw new Error(d.error||'AI request failed');
+    aiAdd('assistant',d.answer);
+    aiHistory.push({role:'assistant',content:d.answer});
+    aiStatusLine.textContent=`${d.model} • READ-ONLY • order execution OFF`;
+  }catch(e){
+    aiAdd('error',String(e.message||e));
+    aiStatusLine.textContent='AI unavailable • live signal engine is unaffected';
+  }finally{
+    aiSend.disabled=false;
+  }
+}
+
+if(aiOrb) aiOrb.addEventListener('click',()=>{
+  aiPanel.classList.add('open');aiPanel.setAttribute('aria-hidden','false');aiCheckStatus();
+});
+if(aiClose) aiClose.addEventListener('click',()=>{
+  aiPanel.classList.remove('open');aiPanel.setAttribute('aria-hidden','true');
+});
+if(aiSend) aiSend.addEventListener('click',()=>aiAsk());
+if(aiInput) aiInput.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();aiAsk();}
+});
+document.querySelectorAll('[data-ai-q]').forEach(b=>b.addEventListener('click',()=>aiAsk(b.dataset.aiQ)));
+aiCheckStatus();

@@ -84,6 +84,8 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
+import analytics_store as analytics
+
 logger = logging.getLogger("krypt_bro")
 
 LAST_SIGNAL = {asset: {"side": None, "time": 0} for asset in ASSETS}
@@ -1290,6 +1292,7 @@ def update_active_signal_bar(asset: str, high: float, low: float, close: float):
             )
             _event({**s, "event": "SL_HIT"})
             _event({**s, "event": "CLOSE", "closed_at": _utcnow()})
+            analytics.close_trade(s, "SL_HIT", float(s["sl"]), -1.0)
             ACTIVE_SIGNALS[asset] = None
             send_telegram_alert(
                 f"🛑 <b>KRYPT BRO • {asset} {s['side']} SL HIT</b>\\n"
@@ -1316,6 +1319,7 @@ def update_active_signal_bar(asset: str, high: float, low: float, close: float):
                     asset, s["side"], label, s["entry"], level, high, low
                 )
                 _event({**s, "event": label})
+                analytics.event(label, s)
                 send_telegram_alert(
                     f"🎯 <b>KRYPT BRO • {asset} {s['side']} {label.replace('_',' ')}</b>\\n"
                     f"Entry: <b>${s['entry']:,.2f}</b>\\n"
@@ -1328,6 +1332,7 @@ def update_active_signal_bar(asset: str, high: float, low: float, close: float):
             s["current"] = float(s["t3"])
             s["r_multiple"] = _r_multiple(s, float(s["t3"]))
             _event({**s, "event": "CLOSE", "closed_at": _utcnow()})
+            analytics.close_trade(s, "T3_HIT", float(s["t3"]), s["r_multiple"])
             ACTIVE_SIGNALS[asset] = None
 
 
