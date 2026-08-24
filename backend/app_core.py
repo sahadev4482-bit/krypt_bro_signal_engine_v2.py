@@ -188,9 +188,6 @@ def api_tokens():
     })
 
 
-@app.get("/api/trading/status")
-def api_trading_status():
-    return jsonify(trade.trading_status())
 
 @app.get("/api/positions")
 def api_positions():
@@ -310,6 +307,7 @@ def api_trading_toggle():
         return jsonify({"success": False, "error": "Delta trading credentials are not configured."}), 400
     TRADING_RUNTIME_ENABLED = enabled
     return jsonify({"success": True, "enabled": TRADING_RUNTIME_ENABLED})
+
 
 @app.get("/api/trading/status")
 def api_trading_status():

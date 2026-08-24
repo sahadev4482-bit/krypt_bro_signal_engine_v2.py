@@ -56,3 +56,6 @@ V4 SIMPLE TRADING UPDATE
 - Trading defaults OFF after every service restart/deploy.
 - Turning ON requires an explicit browser confirmation and configured Delta credentials.
 - Market data, scanner, Telegram and AI continue independently while Trading is OFF.
+
+HOTFIX
+- Removed duplicate /api/trading/status Flask route that caused Render startup AssertionError.
