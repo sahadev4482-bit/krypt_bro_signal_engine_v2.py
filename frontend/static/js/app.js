@@ -512,6 +512,7 @@ function kbConnectLiveStream(){
   kbEventSource=new EventSource('/api/live/stream');
 
   kbEventSource.onmessage=(ev)=>{
+    kbLastStreamMessageAt = Date.now();
     try{
       const d=JSON.parse(ev.data);
       ['BTC','ETH','GOLD'].forEach(a=>kbRenderQuote(a,(d.quotes||{})[a]));
@@ -577,3 +578,44 @@ async function kbAiSidebarStatus(){
 }
 kbAiSidebarStatus();
 setInterval(kbAiSidebarStatus,5000);
+
+
+// ===== HARD FALLBACK FOR LIVE TICKS =====
+let kbLastStreamMessageAt = 0;
+
+if (typeof kbEventSource !== 'undefined' && kbEventSource) {
+  const oldHandler = kbEventSource.onmessage;
+  kbEventSource.onmessage = (ev) => {
+    kbLastStreamMessageAt = Date.now();
+    if (oldHandler) oldHandler(ev);
+  };
+}
+
+async function kbRestLiveFallback(){
+  try{
+    if(Date.now() - kbLastStreamMessageAt < 1500) return;
+    const r = await fetch('/api/live', {cache:'no-store'});
+    if(!r.ok) return;
+    const d = await r.json();
+
+    ['BTC','ETH','GOLD'].forEach(a => {
+      if(typeof kbRenderQuote === 'function'){
+        kbRenderQuote(a, (d.quotes||{})[a]);
+      }
+    });
+
+    const ws=document.getElementById('tickWsState');
+    if(ws){
+      ws.textContent=d.connected?'WS LIVE':'RECONNECTING';
+      ws.className=d.connected?'kb-tick-up':'kb-tick-down';
+    }
+
+    const cnt=document.getElementById('tickCount');
+    if(cnt){
+      cnt.textContent=`${d.ticks_parsed||0} ticks parsed`;
+    }
+  }catch(e){}
+}
+
+setInterval(kbRestLiveFallback,750);
+setTimeout(kbRestLiveFallback,1200);

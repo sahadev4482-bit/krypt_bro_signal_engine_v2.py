@@ -189,6 +189,16 @@ def api_tokens():
 
 
 
+
+@app.get("/api/trading/status")
+def api_trading_status():
+    return jsonify({
+        "success": True,
+        "enabled": bool(globals().get("TRADING_RUNTIME_ENABLED", False)),
+        "credentials_configured": trade.credentials_configured(),
+        "environment_execution_enabled": bool(getattr(trade, "TRADING_ENABLED", False)),
+    })
+
 @app.get("/api/positions")
 def api_positions():
     return jsonify(safe_positions())
@@ -342,6 +352,26 @@ def _ai_context():
     }
 
 
+
+@app.get("/api/system/diagnostics")
+def api_system_diagnostics():
+    live = delta_ws.snapshot()
+    ai = ai_assistant.status()
+    return jsonify({
+        "success": True,
+        "delta_ws_connected": bool(live.get("connected")),
+        "delta_ws_last_message_at": live.get("last_message_at"),
+        "delta_ws_last_error": live.get("last_error"),
+        "messages_seen": live.get("messages_seen", 0),
+        "ticks_parsed": live.get("ticks_parsed", 0),
+        "quotes": live.get("quotes", {}),
+        "scanner_enabled": bool(getattr(eng, "SCANNER_ENABLED", True)),
+        "telegram_enabled": bool(getattr(eng, "TELEGRAM_ENABLED", True)),
+        "trading_enabled": bool(globals().get("TRADING_RUNTIME_ENABLED", False)),
+        "trading_credentials": trade.credentials_configured(),
+        "ai": ai,
+    })
+
 @app.get("/api/ai/status")
 def api_ai_status():
     return jsonify(ai_assistant.status())
@@ -427,8 +457,9 @@ def api_live_stream():
 
 @app.get("/api/live")
 def api_live():
-    """Fast in-memory quote endpoint fed by one Delta public WebSocket."""
     return jsonify(delta_ws.snapshot())
+
+
 
 def scanner_loop():
     eng.logger.info("Dashboard scanner thread started")
