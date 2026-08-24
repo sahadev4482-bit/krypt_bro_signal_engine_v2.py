@@ -3,7 +3,7 @@ import threading
 import time
 import requests
 
-from flask import Flask, jsonify, render_template, request
+from flask import Flask, jsonify, render_template, request, Response, stream_with_context
 
 from backend import signal_engine as eng
 from backend import delta_trading as trade
@@ -366,6 +366,43 @@ def api_performance():
 @app.get("/api/research/trades")
 def api_research_trades():
     return jsonify({"trades": analytics.read_trades(limit=1000)})
+
+
+@app.get("/api/live/stream")
+def api_live_stream():
+    """
+    Push only changed live quotes to the browser.
+    Delta WebSocket -> in-memory cache -> SSE -> frontend.
+    This avoids repeatedly polling /api/live.
+    """
+    def generate():
+        last = {}
+        heartbeat_at = 0.0
+        while True:
+            snap = delta_ws.snapshot()
+            changed = False
+            for asset, quote in (snap.get("quotes") or {}).items():
+                seq = int(quote.get("sequence") or 0)
+                if seq != last.get(asset):
+                    changed = True
+                    last[asset] = seq
+
+            now = time.time()
+            if changed or (now - heartbeat_at) >= 10:
+                import json
+                yield "data: " + json.dumps(snap, separators=(",", ":")) + "\\n\\n"
+                heartbeat_at = now
+            time.sleep(0.10)
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 @app.get("/api/live")
 def api_live():

@@ -42,23 +42,30 @@
         <button class="nav">☷ <span>Journal</span></button>
         <button class="nav">⚙ <span>Settings</span></button>
 
+<div class="kb-ai-below-settings">
+  <div class="kb-robot">
+    <div class="kb-ant"></div>
+    <div class="kb-head">
+      <span class="kb-eye l"></span><span class="kb-eye r"></span>
+      <span class="kb-mouth"></span>
+    </div>
+    <div class="kb-body"><span class="kb-core"></span></div>
+  </div>
+  <div class="kb-ai-meta">
+    <b>OX ALPHA</b>
+    <span id="robotAiState">CHECKING</span>
+    <small>LIVE DATA ASSISTANT</small>
+  </div>
+  <button id="robotChatOpen" class="kb-open-chat">CHAT</button>
+</div>
+
+
         <div class="side-status">
           <div><span>Telegram</span><b id="sideTg">ON</b></div>
           <div><span>Scanner</span><b id="sideScan">ON</b></div>
           <div><span>Delta</span><b>CONNECTED</b></div>
         </div>
       
-
-<div class="kb-ai-sidebar">
-  <div class="kb-robot-scene">
-    <div class="kb-antenna"><i></i></div>
-    <div class="kb-robot-head"><i class="kb-eye left"></i><i class="kb-eye right"></i><i class="kb-mouth"></i></div>
-    <div class="kb-robot-neck"></div>
-    <div class="kb-robot-body"><i class="kb-core"></i></div>
-  </div>
-  <div class="kb-ai-copy"><b>OX ALPHA AI</b><span id="robotAiState">CHECKING</span><small>LIVE CONTEXT • READ ONLY</small></div>
-  <button id="robotChatOpen" class="kb-ai-chat-button">OPEN AI CHAT</button>
-</div>
 </aside>
 
       <main class="workspace">
@@ -92,11 +99,11 @@
         </section>
 
         
-<section class="kb-tick-strip glass hud-edge">
- <div class="kb-tick-box"><span>BTC • TICK</span><b id="tickBTC">--</b><small id="tickAgeBTC">waiting</small></div>
- <div class="kb-tick-box"><span>ETH • TICK</span><b id="tickETH">--</b><small id="tickAgeETH">waiting</small></div>
- <div class="kb-tick-box"><span>GOLD • TICK</span><b id="tickGOLD">--</b><small id="tickAgeGOLD">waiting</small></div>
- <div class="kb-tick-box"><span>DELTA WEBSOCKET</span><b id="tickWsState">CONNECTING</b><small>public trades stream</small></div>
+<section class="kb-live-strip glass hud-edge">
+  <div class="kb-live-box"><img src="/static/icons/btc.svg"><div><span>BTC TICK</span><b id="tickBTC">--</b><small id="tickAgeBTC">WAITING FOR FIRST TICK</small></div></div>
+  <div class="kb-live-box"><img src="/static/icons/eth.svg"><div><span>ETH TICK</span><b id="tickETH">--</b><small id="tickAgeETH">WAITING FOR FIRST TICK</small></div></div>
+  <div class="kb-live-box"><img src="/static/icons/gold.svg"><div><span>GOLD TICK</span><b id="tickGOLD">--</b><small id="tickAgeGOLD">WAITING FOR FIRST TICK</small></div></div>
+  <div class="kb-live-box ws"><div><span>DELTA STREAM</span><b id="tickWsState">CONNECTING</b><small id="tickCount">0 ticks</small></div></div>
 </section>
 
 <section id="cards" class="asset-grid"></section>
@@ -222,7 +229,7 @@
 
     
 
-    <section id="aiPanel" class="ai-panel glass kb-ai-chat-panel" aria-hidden="true">
+    <section id="aiPanel" class="ai-panel glass kb-chat-panel" aria-hidden="true">
       <div class="ai-head">
         <div>
           <b>OX ALPHA • KRYPT BRO AI</b>

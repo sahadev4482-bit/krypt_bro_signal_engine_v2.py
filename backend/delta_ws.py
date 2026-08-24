@@ -22,6 +22,8 @@ _state = {
     "last_message_at": None,
     "last_error": None,
     "reconnects": 0,
+    "messages_seen": 0,
+    "ticks_parsed": 0,
     "quotes": {
         asset: {
             "asset": asset,
@@ -49,6 +51,8 @@ def snapshot():
             "last_message_at": _state["last_message_at"],
             "last_error": _state["last_error"],
             "reconnects": _state["reconnects"],
+            "messages_seen": _state["messages_seen"],
+            "ticks_parsed": _state["ticks_parsed"],
             "quotes": {k: dict(v) for k, v in _state["quotes"].items()},
         }
 
@@ -65,7 +69,7 @@ def _first_number(obj, keys):
 
 
 def _extract_symbol(obj):
-    for key in ("symbol", "product_symbol", "s"):
+    for key in ("symbol", "product_symbol", "sy", "s"):
         value = obj.get(key) if isinstance(obj, dict) else None
         if value:
             return str(value).upper()
@@ -110,10 +114,14 @@ def _handle_trade_message(payload):
         asset = SYMBOL_TO_ASSET[symbol]
         with _lock:
             q = _state["quotes"][asset]
+            first_tick = q.get("price") is None
             q["price"] = price
             q["timestamp"] = _utc_iso()
             q["sequence"] = int(q.get("sequence", 0)) + 1
             _state["last_message_at"] = q["timestamp"]
+            _state["ticks_parsed"] += 1
+        if first_tick:
+            logger.info("LIVE TICK READY | %s %s = %s", asset, symbol, price)
         updated = True
 
         # Tick-level lifecycle tracking. Do NOT run the full strategy here.
@@ -151,6 +159,9 @@ def _on_message(ws, message):
         payload = json.loads(message)
     except Exception:
         return
+
+    with _lock:
+        _state["messages_seen"] += 1
 
     msg_type = payload.get("type") if isinstance(payload, dict) else None
 

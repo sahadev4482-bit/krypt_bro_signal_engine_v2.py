@@ -26,9 +26,8 @@ async function api(path,opts={}){const r=await fetch(path,opts);return r.json()}
 function fmt(v){return v===null||v===undefined?'—':Number(v).toLocaleString(undefined,{maximumFractionDigits:2})}
 
 function assetIcon(asset){
-  if(asset==='BTC') return '<div class="asset-icon btc">₿</div>';
-  if(asset==='ETH') return '<div class="asset-icon eth">◆</div>';
-  if(asset==='GOLD') return '<div class="asset-icon gold">Au</div>';
+  const map={BTC:'btc',ETH:'eth',GOLD:'gold'};
+  if(map[asset]) return `<div class="asset-icon kb-img-icon"><img src="/static/icons/${map[asset]}.svg" alt="${asset}"></div>`;
   return '<div class="asset-icon">'+asset.slice(0,1)+'</div>';
 }
 
@@ -39,9 +38,10 @@ function pivotTable(p){
 }
 
 function tokenEmblem(sym){
-  const meme={DOGE:'🐕',SHIB:'🐶',PEPE:'🐸',WIF:'🐕',BONK:'🐕'};
-  const core={BTC:'₿',ETH:'◆',SOL:'S',XRP:'X',BNB:'B',ADA:'A',GOLD:'Au'};
-  return `<span class="token-emblem ${meme[sym]?'meme':''}">${meme[sym]||core[sym]||sym.slice(0,1)}</span>`;
+  const icons={BTC:'btc',ETH:'eth',GOLD:'gold',SOL:'sol',XRP:'xrp',BNB:'bnb',DOGE:'doge',ADA:'ada',AVAX:'avax',LINK:'link'};
+  if(icons[sym]) return `<span class="token-emblem kb-token-img"><img src="/static/icons/${icons[sym]}.svg" alt="${sym}"></span>`;
+  const meme={SHIB:'🐶',PEPE:'🐸',WIF:'🐕',BONK:'🐕'};
+  return `<span class="token-emblem ${meme[sym]?'meme':''}">${meme[sym]||sym.slice(0,1)}</span>`;
 }
 
 function tokenStatus(move){
@@ -461,27 +461,119 @@ document.querySelectorAll('[data-scan-group]').forEach(btn=>btn.addEventListener
   btn.textContent=`G${d.group} ${d.enabled?'ON':'OFF'}`;
 }));
 
-// CLEAN V4 LIVE TICKS + AI SIDEBAR
-const kbPrev={BTC:null,ETH:null,GOLD:null}, kbAt={BTC:0,ETH:0,GOLD:0};
-function kbN(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:4}):'--'}
-function kbTick(asset,q){
- if(!q||q.price==null)return; const n=Number(q.price); if(!Number.isFinite(n))return;
- const p=kbPrev[asset],d=p==null?0:n>p?1:n<p?-1:0; kbPrev[asset]=n;kbAt[asset]=Date.now();
- const c=d>0?'kb-up':d<0?'kb-down':'kb-flat',a=d>0?'▲':d<0?'▼':'•';
- const s=document.getElementById('tick'+asset);if(s){s.textContent=kbN(n)+' '+a;s.className=c+' kb-pulse'}
- const top=document.getElementById('top'+asset);if(top){top.textContent=kbN(n);top.className=c+' kb-pulse'}
- document.querySelectorAll(`[data-live-price="${asset}"]`).forEach(x=>{x.textContent=kbN(n)+' '+a;x.classList.remove('kb-up','kb-down','kb-flat');x.classList.add(c)})
-}
-async function kbPoll(){
- try{const r=await fetch('/api/live',{cache:'no-store'}),d=await r.json();
-  const w=document.getElementById('tickWsState');if(w){w.textContent=d.connected?'WS LIVE':'RECONNECTING';w.className=d.connected?'kb-up':'kb-down'}
-  ['BTC','ETH','GOLD'].forEach(a=>kbTick(a,(d.quotes||{})[a]));
- }catch(e){}
-}
-setInterval(kbPoll,500);kbPoll();
-setInterval(()=>['BTC','ETH','GOLD'].forEach(a=>{const e=document.getElementById('tickAge'+a);if(e&&kbAt[a]){const s=(Date.now()-kbAt[a])/1000;e.textContent=s<1?'<1 sec ago':s.toFixed(1)+' sec ago'}}),500);
 
-const kbOpen=document.getElementById('robotChatOpen');
-if(kbOpen)kbOpen.addEventListener('click',()=>{if(aiPanel){aiPanel.classList.add('open');aiPanel.setAttribute('aria-hidden','false');aiCheckStatus();if(aiInput)setTimeout(()=>aiInput.focus(),100)}});
-async function kbAi(){try{const r=await fetch('/api/ai/status',{cache:'no-store'}),d=await r.json(),e=document.getElementById('robotAiState');if(e){e.textContent=d.configured?'ONLINE':'KEY NEEDED';e.className=d.configured?'kb-ai-online':'kb-ai-offline'}}catch(e){}}
-setInterval(kbAi,5000);kbAi();
+// ===== REAL DELTA TICK PUSH: WebSocket backend -> SSE browser =====
+const kbLastPrice={BTC:null,ETH:null,GOLD:null};
+const kbLastAt={BTC:0,ETH:0,GOLD:0};
+let kbEventSource=null;
+
+function kbTickFmt(v){
+  const n=Number(v);
+  return Number.isFinite(n)
+    ? n.toLocaleString(undefined,{minimumFractionDigits:0,maximumFractionDigits:4})
+    : '--';
+}
+
+function kbRenderQuote(asset,q){
+  if(!q || q.price===null || q.price===undefined) return;
+  const n=Number(q.price);
+  if(!Number.isFinite(n)) return;
+
+  const before=kbLastPrice[asset];
+  const dir=before===null?0:n>before?1:n<before?-1:0;
+  kbLastPrice[asset]=n;
+  kbLastAt[asset]=Date.now();
+
+  const cls=dir>0?'kb-tick-up':dir<0?'kb-tick-down':'kb-tick-flat';
+  const arrow=dir>0?' ▲':dir<0?' ▼':' •';
+
+  const strip=document.getElementById('tick'+asset);
+  if(strip){
+    strip.textContent=kbTickFmt(n)+arrow;
+    strip.className=cls+' kb-flash';
+  }
+
+  const top=document.getElementById('top'+asset);
+  if(top){
+    top.textContent=kbTickFmt(n);
+    top.classList.remove('kb-tick-up','kb-tick-down','kb-tick-flat','kb-flash');
+    top.classList.add(cls,'kb-flash');
+  }
+
+  document.querySelectorAll(`[data-live-price="${asset}"]`).forEach(el=>{
+    el.textContent=kbTickFmt(n)+arrow;
+    el.classList.remove('kb-tick-up','kb-tick-down','kb-tick-flat','kb-flash');
+    el.classList.add(cls,'kb-flash');
+  });
+}
+
+function kbConnectLiveStream(){
+  if(kbEventSource) kbEventSource.close();
+  kbEventSource=new EventSource('/api/live/stream');
+
+  kbEventSource.onmessage=(ev)=>{
+    try{
+      const d=JSON.parse(ev.data);
+      ['BTC','ETH','GOLD'].forEach(a=>kbRenderQuote(a,(d.quotes||{})[a]));
+
+      const ws=document.getElementById('tickWsState');
+      if(ws){
+        ws.textContent=d.connected?'WS LIVE':'RECONNECTING';
+        ws.className=d.connected?'kb-tick-up':'kb-tick-down';
+      }
+      const cnt=document.getElementById('tickCount');
+      if(cnt) cnt.textContent=`${d.ticks_parsed||0} ticks parsed`;
+
+      const topWs=document.getElementById('deltaWsState');
+      if(topWs){
+        topWs.textContent=d.connected?'WS LIVE':'RECONNECTING';
+        topWs.className=d.connected?'ok':'';
+      }
+    }catch(e){}
+  };
+
+  kbEventSource.onerror=()=>{
+    const ws=document.getElementById('tickWsState');
+    if(ws){ws.textContent='RECONNECTING';ws.className='kb-tick-down';}
+  };
+}
+kbConnectLiveStream();
+
+setInterval(()=>{
+  ['BTC','ETH','GOLD'].forEach(a=>{
+    const el=document.getElementById('tickAge'+a);
+    if(!el || !kbLastAt[a]) return;
+    const age=(Date.now()-kbLastAt[a])/1000;
+    el.textContent=age<1?'<1 sec ago':`${age.toFixed(1)} sec ago`;
+  });
+},500);
+
+
+// ===== AI CHAT DIRECTLY BELOW SETTINGS =====
+const kbChatButton=document.getElementById('robotChatOpen');
+if(kbChatButton){
+  kbChatButton.addEventListener('click',()=>{
+    if(!aiPanel) return;
+    aiPanel.classList.toggle('open');
+    aiPanel.setAttribute('aria-hidden',aiPanel.classList.contains('open')?'false':'true');
+    aiCheckStatus();
+    if(aiPanel.classList.contains('open') && aiInput) setTimeout(()=>aiInput.focus(),120);
+  });
+}
+
+async function kbAiSidebarStatus(){
+  try{
+    const r=await fetch('/api/ai/status',{cache:'no-store'});
+    const d=await r.json();
+    const el=document.getElementById('robotAiState');
+    if(el){
+      el.textContent=d.configured?'ONLINE':'KEY NEEDED';
+      el.className=d.configured?'kb-ai-ok':'kb-ai-bad';
+    }
+  }catch(e){
+    const el=document.getElementById('robotAiState');
+    if(el){el.textContent='OFFLINE';el.className='kb-ai-bad';}
+  }
+}
+kbAiSidebarStatus();
+setInterval(kbAiSidebarStatus,5000);
