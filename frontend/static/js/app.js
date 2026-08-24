@@ -1,4 +1,22 @@
 
+// ===== V4 FINAL TOKEN EMBLEMS =====
+const TOKEN_LOGO_STYLE={
+ BTC:['₿','btc'], ETH:['◆','eth'], GOLD:['Au','gold'], SOL:['S','sol'], XRP:['X','xrp'],
+ BNB:['B','bnb'], ADA:['A','ada'], DOGE:['Ð','doge'], AVAX:['A','avax'], LINK:['L','link'],
+ LTC:['Ł','ltc'], DOT:['●','dot'], TRX:['T','trx'], BCH:['B','bch'], UNI:['U','uni'],
+ ATOM:['⚛','atom'], NEAR:['N','near'], APT:['A','apt'], ARB:['A','arb'], OP:['O','op'],
+ SUI:['S','sui'], FIL:['F','fil'], INJ:['I','inj'], ETC:['Ξ','etc'], AAVE:['A','aave'],
+ MKR:['M','mkr'], RUNE:['R','rune'], SEI:['S','sei'], TIA:['T','tia'], WIF:['W','wif'],
+ PEPE:['P','pepe'], SHIB:['S','shib'], TON:['T','ton'], ICP:['I','icp'], HBAR:['H','hbar'],
+ FET:['F','fet'], RENDER:['R','render'], ALGO:['A','algo'], GRT:['G','grt'], JUP:['J','jup'],
+ BONK:['B','bonk'], PYTH:['P','pyth'], ENA:['E','ena']
+};
+function v4TokenLogo(symbol){
+  const [char,cls]=TOKEN_LOGO_STYLE[symbol]||[String(symbol||'?').slice(0,1),'generic'];
+  return `<span class="v4-token-logo ${cls}">${char}</span>`;
+}
+
+
 const TOKEN_EMBLEMS={
   BTC:'₿',ETH:'◆',GOLD:'Au',SOL:'S',XRP:'X',BNB:'B',ADA:'A',DOGE:'Ð',
   AVAX:'A',LINK:'L',LTC:'Ł',DOT:'●',TRX:'T',BCH:'B',UNI:'U',ATOM:'⚛',
@@ -7,7 +25,7 @@ const TOKEN_EMBLEMS={
   TON:'T',ICP:'I',HBAR:'H',FET:'F',RENDER:'R',ALGO:'A',GRT:'G',JUP:'J',
   BONK:'B',PYTH:'P',ENA:'E'
 };
-function tokenEmblemHtml(symbol){
+function v4TokenLogo(symbol){
   return `<span class="token-emblem">${TOKEN_EMBLEMS[symbol]||symbol.slice(0,1)}</span>`;
 }
 
@@ -38,7 +56,7 @@ function pivotTable(p){
   return '<div class="pivot">'+order.map(k=>`<div class="row"><span>${k}</span><b>${fmt(p[k])}</b></div>`).join('')+'</div>'
 }
 
-function tokenEmblem(sym){
+function v4TokenLogo(sym){
   const meme={DOGE:'🐕',SHIB:'🐶',PEPE:'🐸',WIF:'🐕',BONK:'🐕'};
   const core={BTC:'₿',ETH:'◆',SOL:'S',XRP:'X',BNB:'B',ADA:'A',GOLD:'Au'};
   return `<span class="token-emblem ${meme[sym]?'meme':''}">${meme[sym]||core[sym]||sym.slice(0,1)}</span>`;
@@ -65,7 +83,7 @@ async function renderTokenGroup(){
         : `${t.move_pct>=0?'+':''}${Number(t.move_pct).toFixed(2)}%`;
 
       return `<tr>
-        <td><span class="token-cell">${tokenEmblem(t.symbol)}<b>${t.symbol}</b></span></td>
+        <td><span class="token-cell">${v4TokenLogo(t.symbol)}<b>${t.symbol}</b></span></td>
         <td>${t.rate===null||t.rate===undefined?'—':fmt(t.rate)}</td>
         <td class="${t.move_pct>0?'side-long':t.move_pct<0?'side-short':'pending'}">${move}</td>
         <td>${status.score}</td>
@@ -179,7 +197,7 @@ async function loadSignalHistory(){
           if(x.event==='OPEN') label='ACTIVE';
           if(x.event==='CLOSE') label=x.status||'CLOSED';
           return `<div class="recent-item">
-            <span>${tokenEmblemHtml(x.asset)} ${x.asset}</span>
+            <span>${v4TokenLogo(x.asset)} ${x.asset}</span>
             <b class="${x.side==='LONG'?'side-long':'side-short'}">${x.side||'—'}</b>
             <span class="status-text">${label}</span>
             <b>${x.score??'—'}</b>
@@ -330,7 +348,7 @@ setInterval(loadPositions,15000);
 
 
 // ===== OX ALPHA / KRYPT BRO READ-ONLY AI CHAT =====
-const aiOrb=document.getElementById('aiOrb');
+const aiOrb=null;
 const aiPanel=document.getElementById('aiPanel');
 const aiClose=document.getElementById('aiClose');
 const aiInput=document.getElementById('aiInput');
@@ -460,3 +478,100 @@ document.querySelectorAll('[data-scan-group]').forEach(btn=>btn.addEventListener
   const d=await api('/api/tokens/group/'+btn.dataset.scanGroup,{method:'POST'});
   btn.textContent=`G${d.group} ${d.enabled?'ON':'OFF'}`;
 }));
+
+
+// ===== V4 FINAL VISIBLE TICK STREAM =====
+window.__tickPrev = window.__tickPrev || {};
+window.__tickTime = window.__tickTime || {};
+
+function paintTick(asset, price, seq, ts){
+  if(price===null || price===undefined || !Number.isFinite(Number(price))) return;
+  const n=Number(price);
+  const prev=window.__tickPrev[asset];
+  const dir=prev===undefined?0:(n>prev?1:(n<prev?-1:0));
+  window.__tickPrev[asset]=n;
+  window.__tickTime[asset]=Date.now();
+
+  const priceText=fmt(n);
+  const cls=dir>0?'tick-up':dir<0?'tick-down':'tick-flat';
+  const arrow=dir>0?'▲':dir<0?'▼':'•';
+
+  const top=document.getElementById('top'+asset);
+  if(top){
+    top.textContent=priceText;
+    top.classList.remove('tick-up','tick-down','tick-flat','tick-pop');
+    top.classList.add(cls,'tick-pop');
+  }
+
+  document.querySelectorAll(`[data-live-price="${asset}"]`).forEach(el=>{
+    el.textContent=priceText+' '+arrow;
+    el.classList.remove('tick-up','tick-down','tick-flat','tick-pop');
+    el.classList.add(cls,'tick-pop');
+  });
+
+  const t=document.getElementById('tick'+asset);
+  if(t){
+    t.textContent=priceText+' '+arrow;
+    t.className=cls+' tick-pop';
+  }
+
+  const age=document.getElementById('tickAge'+asset);
+  if(age) age.textContent='just now';
+}
+
+async function hardTickRefresh(){
+  try{
+    const r=await fetch('/api/live',{cache:'no-store'});
+    const d=await r.json();
+
+    const ws=document.getElementById('tickWsState');
+    if(ws){
+      ws.textContent=d.connected?'WS LIVE':'RECONNECTING';
+      ws.className=d.connected?'tick-up':'tick-down';
+    }
+
+    const diag=document.getElementById('deltaWsState');
+    if(diag){
+      diag.textContent=d.connected?'WS LIVE':'RECONNECTING';
+      diag.className=d.connected?'ok':'';
+    }
+
+    for(const [asset,q] of Object.entries(d.quotes||{})){
+      if(['BTC','ETH','GOLD'].includes(asset)) paintTick(asset,q.price,q.sequence,q.timestamp);
+    }
+  }catch(e){
+    const ws=document.getElementById('tickWsState');
+    if(ws){ws.textContent='REST FALLBACK';ws.className='tick-down';}
+  }
+}
+
+setInterval(()=>{
+  for(const a of ['BTC','ETH','GOLD']){
+    const age=document.getElementById('tickAge'+a);
+    if(age && window.__tickTime[a]){
+      const sec=(Date.now()-window.__tickTime[a])/1000;
+      age.textContent=sec<1?'<1s ago':sec.toFixed(1)+'s ago';
+    }
+  }
+},500);
+
+setInterval(hardTickRefresh,400);
+hardTickRefresh();
+
+
+async function v4AiStatus(){
+  try{
+    const r=await fetch('/api/ai/status',{cache:'no-store'});
+    const d=await r.json();
+    const state=document.getElementById('robotAiState');
+    if(state){
+      state.textContent=d.configured?'ONLINE':'KEY NEEDED';
+      state.className=d.configured?'ai-online':'ai-offline';
+    }
+  }catch(e){
+    const state=document.getElementById('robotAiState');
+    if(state){state.textContent='OFFLINE';state.className='ai-offline';}
+  }
+}
+setInterval(v4AiStatus,5000);
+v4AiStatus();

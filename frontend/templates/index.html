@@ -48,19 +48,36 @@
           <div><span>Delta</span><b>CONNECTED</b></div>
         </div>
       
-<div class="robot-ai-dock" id="robotAiDock">
-  <div class="robot-avatar">
-    <div class="robot-head">
-      <span class="robot-eye"></span><span class="robot-eye"></span>
-    </div>
-    <div class="robot-core"></div>
-  </div>
+
   <div class="robot-meta">
     <b>OX ALPHA AI</b>
     <span id="robotAiState">CHECKING</span>
     <small>LIVE CONTEXT • READ ONLY</small>
   </div>
   <button id="robotChatOpen" class="robot-chat-btn">CHAT</button>
+</div>
+
+<div class="left-ai-panel" id="leftAiPanel">
+  <div class="left-ai-robot-wrap">
+    <div class="left-ai-robot">
+      <div class="ai-ant"></div>
+      <div class="ai-face">
+        <span class="ai-eye"></span>
+        <span class="ai-eye"></span>
+        <span class="ai-mouth"></span>
+      </div>
+      <div class="ai-neck"></div>
+      <div class="ai-body">
+        <span class="ai-core"></span>
+      </div>
+    </div>
+  </div>
+  <div class="left-ai-info">
+    <b>OX ALPHA AI</b>
+    <span id="robotAiState">CHECKING</span>
+    <small>LIVE CONTEXT • READ ONLY</small>
+  </div>
+  <button id="robotChatOpen" class="robot-chat-btn">OPEN AI CHAT</button>
 </div>
 </aside>
 
@@ -86,15 +103,22 @@
         <section class="overview glass hud-edge">
           <div class="overview-title">MARKET OVERVIEW</div>
           <div class="overview-cards">
-            <div class="mini-market"><span>BTC</span><b id="topBTC">—</b><small id="btcState">LIVE</small></div>
-            <div class="mini-market"><span>ETH</span><b id="topETH">—</b><small id="ethState">LIVE</small></div>
-            <div class="mini-market"><span>GOLD</span><b id="topGOLD">—</b><small id="goldState">LIVE</small></div>
+            <div class="mini-market"><span>BTC</span><b id="topBTC" class="tick-price">—</b><small id="btcState">LIVE</small></div>
+            <div class="mini-market"><span>ETH</span><b id="topETH" class="tick-price">—</b><small id="ethState">LIVE</small></div>
+            <div class="mini-market"><span>GOLD</span><b id="topGOLD" class="tick-price">—</b><small id="goldState">LIVE</small></div>
             <div class="mini-market"><span>SCANNER</span><b id="scannerMetric">ON</b><small>5M GATE</small></div>
             <div class="mini-market"><span>TELEGRAM</span><b id="telegramMetric">ON</b><small>SINGLE GROUP</small></div>
           </div>
         </section>
 
-        <section id="cards" class="asset-grid"></section>
+        <section 
+<div class="primary-tick-strip">
+  <div class="tick-cell"><span>BTC TICK</span><b id="tickBTC">--</b><small id="tickAgeBTC">waiting</small></div>
+  <div class="tick-cell"><span>ETH TICK</span><b id="tickETH">--</b><small id="tickAgeETH">waiting</small></div>
+  <div class="tick-cell"><span>GOLD TICK</span><b id="tickGOLD">--</b><small id="tickAgeGOLD">waiting</small></div>
+  <div class="tick-cell ws-cell"><span>WEBSOCKET</span><b id="tickWsState">CONNECTING</b><small>Delta public feed</small></div>
+</div>
+id="cards" class="asset-grid"></section>
 
         <section class="lower-grid">
           <div class="token-panel glass hud-edge">
@@ -217,7 +241,7 @@
 
     
 
-    <section id="aiPanel" class="ai-panel glass" aria-hidden="true">
+    <section id="aiPanel" class="ai-panel glass left-chat-panel" aria-hidden="true">
       <div class="ai-head">
         <div>
           <b>OX ALPHA • KRYPT BRO AI</b>
