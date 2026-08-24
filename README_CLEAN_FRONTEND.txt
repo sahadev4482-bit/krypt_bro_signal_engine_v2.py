@@ -1,0 +1,1 @@
+Rebuilt from last working V4 base. Fixes broken main-section HTML, adds visible live tick strip, large left robot AI panel, and preserves backend.

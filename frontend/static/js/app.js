@@ -1,22 +1,4 @@
 
-// ===== V4 FINAL TOKEN EMBLEMS =====
-const TOKEN_LOGO_STYLE={
- BTC:['₿','btc'], ETH:['◆','eth'], GOLD:['Au','gold'], SOL:['S','sol'], XRP:['X','xrp'],
- BNB:['B','bnb'], ADA:['A','ada'], DOGE:['Ð','doge'], AVAX:['A','avax'], LINK:['L','link'],
- LTC:['Ł','ltc'], DOT:['●','dot'], TRX:['T','trx'], BCH:['B','bch'], UNI:['U','uni'],
- ATOM:['⚛','atom'], NEAR:['N','near'], APT:['A','apt'], ARB:['A','arb'], OP:['O','op'],
- SUI:['S','sui'], FIL:['F','fil'], INJ:['I','inj'], ETC:['Ξ','etc'], AAVE:['A','aave'],
- MKR:['M','mkr'], RUNE:['R','rune'], SEI:['S','sei'], TIA:['T','tia'], WIF:['W','wif'],
- PEPE:['P','pepe'], SHIB:['S','shib'], TON:['T','ton'], ICP:['I','icp'], HBAR:['H','hbar'],
- FET:['F','fet'], RENDER:['R','render'], ALGO:['A','algo'], GRT:['G','grt'], JUP:['J','jup'],
- BONK:['B','bonk'], PYTH:['P','pyth'], ENA:['E','ena']
-};
-function v4TokenLogo(symbol){
-  const [char,cls]=TOKEN_LOGO_STYLE[symbol]||[String(symbol||'?').slice(0,1),'generic'];
-  return `<span class="v4-token-logo ${cls}">${char}</span>`;
-}
-
-
 const TOKEN_EMBLEMS={
   BTC:'₿',ETH:'◆',GOLD:'Au',SOL:'S',XRP:'X',BNB:'B',ADA:'A',DOGE:'Ð',
   AVAX:'A',LINK:'L',LTC:'Ł',DOT:'●',TRX:'T',BCH:'B',UNI:'U',ATOM:'⚛',
@@ -25,7 +7,7 @@ const TOKEN_EMBLEMS={
   TON:'T',ICP:'I',HBAR:'H',FET:'F',RENDER:'R',ALGO:'A',GRT:'G',JUP:'J',
   BONK:'B',PYTH:'P',ENA:'E'
 };
-function v4TokenLogo(symbol){
+function tokenEmblemHtml(symbol){
   return `<span class="token-emblem">${TOKEN_EMBLEMS[symbol]||symbol.slice(0,1)}</span>`;
 }
 
@@ -56,7 +38,7 @@ function pivotTable(p){
   return '<div class="pivot">'+order.map(k=>`<div class="row"><span>${k}</span><b>${fmt(p[k])}</b></div>`).join('')+'</div>'
 }
 
-function v4TokenLogo(sym){
+function tokenEmblem(sym){
   const meme={DOGE:'🐕',SHIB:'🐶',PEPE:'🐸',WIF:'🐕',BONK:'🐕'};
   const core={BTC:'₿',ETH:'◆',SOL:'S',XRP:'X',BNB:'B',ADA:'A',GOLD:'Au'};
   return `<span class="token-emblem ${meme[sym]?'meme':''}">${meme[sym]||core[sym]||sym.slice(0,1)}</span>`;
@@ -83,7 +65,7 @@ async function renderTokenGroup(){
         : `${t.move_pct>=0?'+':''}${Number(t.move_pct).toFixed(2)}%`;
 
       return `<tr>
-        <td><span class="token-cell">${v4TokenLogo(t.symbol)}<b>${t.symbol}</b></span></td>
+        <td><span class="token-cell">${tokenEmblem(t.symbol)}<b>${t.symbol}</b></span></td>
         <td>${t.rate===null||t.rate===undefined?'—':fmt(t.rate)}</td>
         <td class="${t.move_pct>0?'side-long':t.move_pct<0?'side-short':'pending'}">${move}</td>
         <td>${status.score}</td>
@@ -197,7 +179,7 @@ async function loadSignalHistory(){
           if(x.event==='OPEN') label='ACTIVE';
           if(x.event==='CLOSE') label=x.status||'CLOSED';
           return `<div class="recent-item">
-            <span>${v4TokenLogo(x.asset)} ${x.asset}</span>
+            <span>${tokenEmblemHtml(x.asset)} ${x.asset}</span>
             <b class="${x.side==='LONG'?'side-long':'side-short'}">${x.side||'—'}</b>
             <span class="status-text">${label}</span>
             <b>${x.score??'—'}</b>
@@ -479,99 +461,27 @@ document.querySelectorAll('[data-scan-group]').forEach(btn=>btn.addEventListener
   btn.textContent=`G${d.group} ${d.enabled?'ON':'OFF'}`;
 }));
 
-
-// ===== V4 FINAL VISIBLE TICK STREAM =====
-window.__tickPrev = window.__tickPrev || {};
-window.__tickTime = window.__tickTime || {};
-
-function paintTick(asset, price, seq, ts){
-  if(price===null || price===undefined || !Number.isFinite(Number(price))) return;
-  const n=Number(price);
-  const prev=window.__tickPrev[asset];
-  const dir=prev===undefined?0:(n>prev?1:(n<prev?-1:0));
-  window.__tickPrev[asset]=n;
-  window.__tickTime[asset]=Date.now();
-
-  const priceText=fmt(n);
-  const cls=dir>0?'tick-up':dir<0?'tick-down':'tick-flat';
-  const arrow=dir>0?'▲':dir<0?'▼':'•';
-
-  const top=document.getElementById('top'+asset);
-  if(top){
-    top.textContent=priceText;
-    top.classList.remove('tick-up','tick-down','tick-flat','tick-pop');
-    top.classList.add(cls,'tick-pop');
-  }
-
-  document.querySelectorAll(`[data-live-price="${asset}"]`).forEach(el=>{
-    el.textContent=priceText+' '+arrow;
-    el.classList.remove('tick-up','tick-down','tick-flat','tick-pop');
-    el.classList.add(cls,'tick-pop');
-  });
-
-  const t=document.getElementById('tick'+asset);
-  if(t){
-    t.textContent=priceText+' '+arrow;
-    t.className=cls+' tick-pop';
-  }
-
-  const age=document.getElementById('tickAge'+asset);
-  if(age) age.textContent='just now';
+// CLEAN V4 LIVE TICKS + AI SIDEBAR
+const kbPrev={BTC:null,ETH:null,GOLD:null}, kbAt={BTC:0,ETH:0,GOLD:0};
+function kbN(v){const n=Number(v);return Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:4}):'--'}
+function kbTick(asset,q){
+ if(!q||q.price==null)return; const n=Number(q.price); if(!Number.isFinite(n))return;
+ const p=kbPrev[asset],d=p==null?0:n>p?1:n<p?-1:0; kbPrev[asset]=n;kbAt[asset]=Date.now();
+ const c=d>0?'kb-up':d<0?'kb-down':'kb-flat',a=d>0?'▲':d<0?'▼':'•';
+ const s=document.getElementById('tick'+asset);if(s){s.textContent=kbN(n)+' '+a;s.className=c+' kb-pulse'}
+ const top=document.getElementById('top'+asset);if(top){top.textContent=kbN(n);top.className=c+' kb-pulse'}
+ document.querySelectorAll(`[data-live-price="${asset}"]`).forEach(x=>{x.textContent=kbN(n)+' '+a;x.classList.remove('kb-up','kb-down','kb-flat');x.classList.add(c)})
 }
-
-async function hardTickRefresh(){
-  try{
-    const r=await fetch('/api/live',{cache:'no-store'});
-    const d=await r.json();
-
-    const ws=document.getElementById('tickWsState');
-    if(ws){
-      ws.textContent=d.connected?'WS LIVE':'RECONNECTING';
-      ws.className=d.connected?'tick-up':'tick-down';
-    }
-
-    const diag=document.getElementById('deltaWsState');
-    if(diag){
-      diag.textContent=d.connected?'WS LIVE':'RECONNECTING';
-      diag.className=d.connected?'ok':'';
-    }
-
-    for(const [asset,q] of Object.entries(d.quotes||{})){
-      if(['BTC','ETH','GOLD'].includes(asset)) paintTick(asset,q.price,q.sequence,q.timestamp);
-    }
-  }catch(e){
-    const ws=document.getElementById('tickWsState');
-    if(ws){ws.textContent='REST FALLBACK';ws.className='tick-down';}
-  }
+async function kbPoll(){
+ try{const r=await fetch('/api/live',{cache:'no-store'}),d=await r.json();
+  const w=document.getElementById('tickWsState');if(w){w.textContent=d.connected?'WS LIVE':'RECONNECTING';w.className=d.connected?'kb-up':'kb-down'}
+  ['BTC','ETH','GOLD'].forEach(a=>kbTick(a,(d.quotes||{})[a]));
+ }catch(e){}
 }
+setInterval(kbPoll,500);kbPoll();
+setInterval(()=>['BTC','ETH','GOLD'].forEach(a=>{const e=document.getElementById('tickAge'+a);if(e&&kbAt[a]){const s=(Date.now()-kbAt[a])/1000;e.textContent=s<1?'<1 sec ago':s.toFixed(1)+' sec ago'}}),500);
 
-setInterval(()=>{
-  for(const a of ['BTC','ETH','GOLD']){
-    const age=document.getElementById('tickAge'+a);
-    if(age && window.__tickTime[a]){
-      const sec=(Date.now()-window.__tickTime[a])/1000;
-      age.textContent=sec<1?'<1s ago':sec.toFixed(1)+'s ago';
-    }
-  }
-},500);
-
-setInterval(hardTickRefresh,400);
-hardTickRefresh();
-
-
-async function v4AiStatus(){
-  try{
-    const r=await fetch('/api/ai/status',{cache:'no-store'});
-    const d=await r.json();
-    const state=document.getElementById('robotAiState');
-    if(state){
-      state.textContent=d.configured?'ONLINE':'KEY NEEDED';
-      state.className=d.configured?'ai-online':'ai-offline';
-    }
-  }catch(e){
-    const state=document.getElementById('robotAiState');
-    if(state){state.textContent='OFFLINE';state.className='ai-offline';}
-  }
-}
-setInterval(v4AiStatus,5000);
-v4AiStatus();
+const kbOpen=document.getElementById('robotChatOpen');
+if(kbOpen)kbOpen.addEventListener('click',()=>{if(aiPanel){aiPanel.classList.add('open');aiPanel.setAttribute('aria-hidden','false');aiCheckStatus();if(aiInput)setTimeout(()=>aiInput.focus(),100)}});
+async function kbAi(){try{const r=await fetch('/api/ai/status',{cache:'no-store'}),d=await r.json(),e=document.getElementById('robotAiState');if(e){e.textContent=d.configured?'ONLINE':'KEY NEEDED';e.className=d.configured?'kb-ai-online':'kb-ai-offline'}}catch(e){}}
+setInterval(kbAi,5000);kbAi();
