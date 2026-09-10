@@ -1,0 +1,52 @@
+KRYPT BRO STRATEGY V2.1 - DELTA CRYPTO OPTIONS POLISH
+Date: 2026-09-10
+
+SCOPE
+- BTC / ETH / GOLD only.
+- Delta Exchange India only.
+- Existing app.py, scanner lifecycle, Telegram delivery, dashboard, trading runtime,
+  WebSocket modules and deployment structure were NOT redesigned.
+- Strategy changes are isolated to backend/signal_engine.py.
+- Original backend signal engine preserved as backend/signal_engine.py.original_v3.
+
+ADDED / IMPROVED
+1. 4H trend confirmation (EMA20/EMA50) as a SOFT filter, not a hard blocker.
+2. 4H Fibonacci pivots in addition to Daily and 5M pivots.
+3. Recent 15M swing Fib: 0.382 / 0.500 / 0.618 / 0.786.
+4. Williams %R on 15M and 5M, used as timing confirmation.
+5. ADX + +DI/-DI on 15M, used as trend-strength confirmation.
+6. Volume score now also respects latest candle direction.
+7. Direction-aware Fib score replaces neutral Fib scoring.
+8. Counter-1H setups remain possible but receive a score penalty.
+9. Delta option-chain enrichment after a fully confirmed underlying signal only.
+10. Option selector prefers nearest valid expiry, near-ATM/slightly ITM contracts,
+    useful Delta range, tighter spread, OI and volume.
+11. Telegram signal can show selected Delta CALL/PUT, strike, expiry, current
+    premium, mark price, Delta, OI, volume, spread and estimated premium SL/T1/T2/T3.
+
+IMPORTANT OPTION NOTE
+- Premium SL/T1/T2/T3 are local Greek (Delta/Gamma) estimates around the current
+  market state. Actual premium can differ because IV, theta, liquidity and
+  order-book conditions change.
+- Option-chain failure NEVER blocks the core underlying signal scanner.
+
+NEW OPTIONAL ENV SETTINGS (defaults already work)
+ADX_PERIOD=14
+ADX_TREND_MIN=20
+WILLIAMS_PERIOD=14
+OPTION_MIN_EXPIRY_HOURS=2.0
+OPTION_MAX_SPREAD_PCT=12.0
+OPTION_TARGET_DELTA_MIN=0.30
+OPTION_TARGET_DELTA_MAX=0.72
+OPTION_CHAIN_TIMEOUT=10
+
+TESTS COMPLETED
+- Python syntax compile: PASS
+- Williams %R + ADX synthetic-data smoke test: PASS
+- Option selector using mocked Delta ticker payload: PASS
+- Telegram formatting with option block: PASS
+
+NOTE
+The build environment used to prepare this ZIP did not have outbound DNS access,
+so the live Delta endpoint could not be called from the container. Endpoint shape
+and option ticker fields were checked against current Delta Exchange API docs.

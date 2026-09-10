@@ -1,6 +1,6 @@
 # KRYPT BRO SIGNAL ENGINE v3 - DELTA ONLY + GOLD + LOW LOAD
 # Pure signal generation first.
-# Includes: Daily + 4H + 5M Fib R1-R5/S1-S5, 4H/1H/15M/5M MTF,
+# Includes: Daily + 5M Fib R1-R5/S1-S5, 1H/15M/5M MTF,
 # closed-candle checks, stale-data rejection, ATR/EMA extension filters,
 # directional Fib context, minimum R:R, cooldown and Telegram ON/OFF.
 #
@@ -12,8 +12,7 @@ import json
 import http.server
 import socketserver
 import threading
-from datetime import datetime, timezone, timedelta
-from zoneinfo import ZoneInfo
+from datetime import datetime, timezone
 
 import pandas as pd
 import requests
@@ -79,25 +78,6 @@ VOLUME_MULTIPLIER = float(os.getenv("VOLUME_MULTIPLIER", "1.05"))
 # ATR-based risk
 ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", "1.20"))
 
-# Strategy polish v2.1 (confirmation-only additions; scanner/runtime flow unchanged)
-ADX_PERIOD = int(os.getenv("ADX_PERIOD", "14"))
-ADX_TREND_MIN = float(os.getenv("ADX_TREND_MIN", "20"))
-WILLIAMS_PERIOD = int(os.getenv("WILLIAMS_PERIOD", "14"))
-OPTION_MIN_EXPIRY_HOURS = float(os.getenv("OPTION_MIN_EXPIRY_HOURS", "2.0"))
-OPTION_MAX_SPREAD_PCT = float(os.getenv("OPTION_MAX_SPREAD_PCT", "12.0"))
-OPTION_TARGET_DELTA_MIN = float(os.getenv("OPTION_TARGET_DELTA_MIN", "0.30"))
-OPTION_TARGET_DELTA_MAX = float(os.getenv("OPTION_TARGET_DELTA_MAX", "0.72"))
-OPTION_CHAIN_TIMEOUT = float(os.getenv("OPTION_CHAIN_TIMEOUT", "10"))
-
-# Delta option-chain underlying names. GOLD is tried defensively across the
-# currently listed tokenised-gold underlyings so an unavailable alias never
-# interrupts the core BTC/ETH/GOLD signal scanner.
-OPTION_UNDERLYINGS = {
-    "BTC": ["BTC"],
-    "ETH": ["ETH"],
-    "GOLD": ["PAXG", "XAUT", "GOLD"],
-}
-
 DELTA_BASE_URL = "https://api.india.delta.exchange"
 
 logging.basicConfig(
@@ -131,10 +111,8 @@ LATEST_STATUS = {
         "grade": "-",
         "rr": None,
         "daily_fibs": {},
-        "four_hour_fibs": {},
         "five_min_fibs": {},
         "confluence": {},
-        "option": None,
         "updated_at": None,
     }
     for asset in ASSETS
@@ -383,45 +361,6 @@ def add_atr(df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
     return out
 
 
-def add_williams_r(df: pd.DataFrame, period: int = WILLIAMS_PERIOD) -> pd.DataFrame:
-    """Williams %R, bounded roughly between -100 and 0."""
-    out = df.copy()
-    hh = out["high"].rolling(period, min_periods=period).max()
-    ll = out["low"].rolling(period, min_periods=period).min()
-    denom = (hh - ll).replace(0, math.nan)
-    out["williams_r"] = -100.0 * (hh - out["close"]) / denom
-    out["williams_r"] = out["williams_r"].fillna(-50.0).clip(-100.0, 0.0)
-    return out
-
-
-def add_adx(df: pd.DataFrame, period: int = ADX_PERIOD) -> pd.DataFrame:
-    """Wilder-style ADX with +DI/-DI for trend-strength confirmation."""
-    out = df.copy()
-    up = out["high"].diff()
-    down = -out["low"].diff()
-    plus_dm = up.where((up > down) & (up > 0), 0.0)
-    minus_dm = down.where((down > up) & (down > 0), 0.0)
-
-    prev_close = out["close"].shift(1)
-    tr = pd.concat([
-        out["high"] - out["low"],
-        (out["high"] - prev_close).abs(),
-        (out["low"] - prev_close).abs(),
-    ], axis=1).max(axis=1)
-
-    atr = tr.ewm(alpha=1 / period, adjust=False).mean().replace(0, math.nan)
-    plus_sm = plus_dm.ewm(alpha=1 / period, adjust=False).mean()
-    minus_sm = minus_dm.ewm(alpha=1 / period, adjust=False).mean()
-    plus_di = 100.0 * plus_sm / atr
-    minus_di = 100.0 * minus_sm / atr
-    dx = 100.0 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, math.nan)
-
-    out["plus_di"] = plus_di.fillna(0.0)
-    out["minus_di"] = minus_di.fillna(0.0)
-    out["adx"] = dx.ewm(alpha=1 / period, adjust=False).mean().fillna(0.0)
-    return out
-
-
 # ============================================================
 # FIBONACCI PIVOTS
 # ============================================================
@@ -491,38 +430,6 @@ def get_5m_fib_levels(df_5m: pd.DataFrame) -> dict:
         float(candle["low"]),
         float(candle["close"]),
     )
-
-
-def get_4h_fib_levels(df_4h: pd.DataFrame) -> dict:
-    if df_4h.empty:
-        return {}
-    now_utc = pd.Timestamp.now(tz="UTC")
-    closed = df_4h[df_4h["close_time"] <= now_utc]
-    if closed.empty:
-        return {}
-    candle = closed.iloc[-1]
-    return fibonacci_pivots(float(candle["high"]), float(candle["low"]), float(candle["close"]))
-
-
-def swing_fib_levels(df: pd.DataFrame, lookback: int = 48) -> dict:
-    """Recent 15M range retracements. Used as soft confluence, never a hard gate."""
-    if df.empty:
-        return {}
-    now_utc = pd.Timestamp.now(tz="UTC")
-    closed = df[df["close_time"] <= now_utc].tail(lookback)
-    if len(closed) < 12:
-        return {}
-    hi = float(closed["high"].max())
-    lo = float(closed["low"].min())
-    rng = hi - lo
-    if rng <= 0:
-        return {}
-    return {
-        "0.382": round(hi - 0.382 * rng, 2),
-        "0.500": round(hi - 0.500 * rng, 2),
-        "0.618": round(hi - 0.618 * rng, 2),
-        "0.786": round(hi - 0.786 * rng, 2),
-    }
 
 
 def nearest_level(price: float, levels: dict) -> tuple[str | None, float | None, float]:
@@ -619,48 +526,40 @@ def candle_is_fresh(candle: pd.Series) -> bool:
         return False
 
 
-def fib_context_for_side(side: str, price: float, daily: dict, four_hour: dict, five_min: dict, swing: dict | None = None) -> dict:
-    """Direction-aware Daily/4H/5M pivot + swing-Fib context."""
+def fib_context_for_side(side: str, price: float, daily: dict, five_min: dict) -> dict:
+    """
+    Direction-aware Fib context.
+    LONG prefers nearby support/pivot below price.
+    SHORT prefers nearby resistance/pivot above price.
+    """
     tolerance = price * (FIB_NEAR_PCT / 100.0)
-    swing = swing or {}
 
-    def candidates(levels, support):
-        if support:
-            return [(k, v) for k, v in levels.items() if (k.startswith("S") or k == "P") and v <= price + tolerance]
-        return [(k, v) for k, v in levels.items() if (k.startswith("R") or k == "P") and v >= price - tolerance]
+    if side == "LONG":
+        d_candidates = [(k, v) for k, v in daily.items() if (k.startswith("S") or k == "P") and v <= price + tolerance]
+        m_candidates = [(k, v) for k, v in five_min.items() if (k.startswith("S") or k == "P") and v <= price + tolerance]
+    else:
+        d_candidates = [(k, v) for k, v in daily.items() if (k.startswith("R") or k == "P") and v >= price - tolerance]
+        m_candidates = [(k, v) for k, v in five_min.items() if (k.startswith("R") or k == "P") and v >= price - tolerance]
 
-    support = side == "LONG"
-
-    def nearest(items):
-        if not items:
+    def nearest(candidates):
+        if not candidates:
             return None, None
-        return min(items, key=lambda item: abs(price - item[1]))
+        return min(candidates, key=lambda item: abs(price - item[1]))
 
-    d_name, d_value = nearest(candidates(daily, support))
-    h4_name, h4_value = nearest(candidates(four_hour, support))
-    m_name, m_value = nearest(candidates(five_min, support))
-    sw_name, sw_value = nearest(list(swing.items()))
+    d_name, d_value = nearest(d_candidates)
+    m_name, m_value = nearest(m_candidates)
 
-    directional_values = [v for v in (d_value, h4_value, m_value) if v is not None]
-    pair_count = 0
-    for i, a in enumerate(directional_values):
-        for b in directional_values[i + 1:]:
-            if abs(a - b) <= tolerance:
-                pair_count += 1
-
-    swing_near = sw_value is not None and abs(price - sw_value) <= tolerance
-    paired = pair_count > 0
-    triple = len(directional_values) == 3 and max(directional_values) - min(directional_values) <= tolerance
+    paired = (
+        d_value is not None and m_value is not None
+        and abs(d_value - m_value) <= tolerance
+    )
 
     return {
-        "daily_name": d_name, "daily_value": d_value,
-        "four_name": h4_name, "four_value": h4_value,
-        "five_name": m_name, "five_value": m_value,
-        "swing_name": sw_name if swing_near else None,
-        "swing_value": sw_value if swing_near else None,
+        "daily_name": d_name,
+        "daily_value": d_value,
+        "five_name": m_name,
+        "five_value": m_value,
         "paired": paired,
-        "triple": triple,
-        "swing_near": swing_near,
     }
 
 
@@ -805,370 +704,280 @@ def pending_signal_gate(asset: str, side: str, setup: dict) -> dict:
 
 
 # ============================================================
-# DELTA OPTION PREMIUM / CONTRACT SELECTION (READ-ONLY)
-# ============================================================
-
-def _fnum(value, default=None):
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
-def _option_expiry_from_symbol(symbol: str, asset: str) -> datetime | None:
-    """Parse C-BTC-90000-310125 style symbols into an aware expiry datetime."""
-    try:
-        date_token = str(symbol).split("-")[-1]
-        expiry_day = datetime.strptime(date_token, "%d%m%y")
-        hour, minute = (21, 30) if asset == "GOLD" else (17, 30)
-        ist = ZoneInfo("Asia/Kolkata")
-        return expiry_day.replace(hour=hour, minute=minute, tzinfo=ist)
-    except Exception:
-        return None
-
-
-def fetch_delta_option_chain(asset: str) -> list[dict]:
-    """Best-effort public Delta option-chain fetch. Failure never blocks core signals."""
-    rows = []
-    for underlying in OPTION_UNDERLYINGS.get(asset, [asset]):
-        try:
-            response = requests.get(
-                f"{DELTA_BASE_URL}/v2/tickers",
-                params={
-                    "contract_types": "call_options,put_options",
-                    "underlying_asset_symbols": underlying,
-                },
-                headers={"Accept": "application/json"},
-                timeout=OPTION_CHAIN_TIMEOUT,
-            )
-            if not response.ok:
-                continue
-            payload = response.json()
-            result = payload.get("result", []) if isinstance(payload, dict) else []
-            if result:
-                rows = [r for r in result if isinstance(r, dict)]
-                if rows:
-                    break
-        except Exception as exc:
-            logger.debug("%s option chain fetch failed for %s: %s", asset, underlying, exc)
-    return rows
-
-
-def select_option_contract(asset: str, side: str, underlying_price: float, underlying_stop: float, targets: list[float]) -> dict | None:
-    """
-    Choose a liquid near-ATM/near-ITM Delta option and calculate current premium
-    plus Greek-based premium estimates at underlying SL/T1/T2/T3.
-
-    These are estimates only; IV/theta changes can materially alter realised premium.
-    """
-    chain = fetch_delta_option_chain(asset)
-    if not chain:
-        return None
-
-    want_type = "call_options" if side == "LONG" else "put_options"
-    now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
-    candidates = []
-
-    for row in chain:
-        if row.get("contract_type") != want_type:
-            continue
-        symbol = str(row.get("symbol") or "")
-        expiry = _option_expiry_from_symbol(symbol, asset)
-        if expiry is None:
-            continue
-        hours_left = (expiry - now_ist).total_seconds() / 3600.0
-        if hours_left < OPTION_MIN_EXPIRY_HOURS:
-            continue
-
-        strike = _fnum(row.get("strike_price"))
-        mark = _fnum(row.get("mark_price"))
-        quotes = row.get("quotes") or {}
-        bid = _fnum(quotes.get("best_bid"))
-        ask = _fnum(quotes.get("best_ask"))
-        oi = _fnum(row.get("oi"), 0.0) or 0.0
-        volume = _fnum(row.get("volume"), 0.0) or 0.0
-        greeks = row.get("greeks") or {}
-        delta = _fnum(greeks.get("delta"))
-        gamma = _fnum(greeks.get("gamma"), 0.0) or 0.0
-        theta = _fnum(greeks.get("theta"))
-        iv = _fnum(row.get("mark_vol"))
-
-        if strike is None or mark is None or mark <= 0:
-            continue
-        mid = None
-        spread_pct = None
-        if bid is not None and ask is not None and bid > 0 and ask >= bid:
-            mid = (bid + ask) / 2.0
-            spread_pct = ((ask - bid) / max(mid, 1e-9)) * 100.0
-            if spread_pct > OPTION_MAX_SPREAD_PCT:
-                continue
-
-        entry_premium = ask if ask is not None and ask > 0 else (mid if mid else mark)
-        abs_delta = abs(delta) if delta is not None else None
-        if abs_delta is not None and not (OPTION_TARGET_DELTA_MIN <= abs_delta <= OPTION_TARGET_DELTA_MAX):
-            continue
-
-        # Prefer same nearest expiry first, then near-ATM with slight ITM preference,
-        # tighter spread, greater OI and volume.
-        moneyness = abs(strike - underlying_price) / max(underlying_price, 1e-9)
-        itm = (side == "LONG" and strike <= underlying_price) or (side == "SHORT" and strike >= underlying_price)
-        score = 100.0
-        score -= moneyness * 1000.0
-        score += 3.0 if itm else 0.0
-        score -= (spread_pct or 6.0) * 0.8
-        score += min(math.log10(oi + 1.0) * 2.0, 10.0)
-        score += min(math.log10(volume + 1.0), 5.0)
-
-        candidates.append({
-            "row": row, "symbol": symbol, "expiry": expiry, "hours_left": hours_left,
-            "strike": strike, "mark": mark, "entry": entry_premium, "bid": bid, "ask": ask,
-            "spread_pct": spread_pct, "oi": oi, "volume": volume, "delta": delta,
-            "gamma": gamma, "theta": theta, "iv": iv, "liquidity_score": score,
-        })
-
-    if not candidates:
-        return None
-
-    nearest_expiry = min(c["expiry"] for c in candidates)
-    same_expiry = [c for c in candidates if c["expiry"] == nearest_expiry]
-    chosen = max(same_expiry, key=lambda c: c["liquidity_score"])
-
-    def premium_estimate(underlying_target):
-        # Delta/Gamma approximation around current spot. Keep estimates non-negative.
-        if chosen["delta"] is None:
-            return None
-        ds = float(underlying_target) - underlying_price
-        est = chosen["mark"] + chosen["delta"] * ds + 0.5 * chosen["gamma"] * (ds ** 2)
-        return round(max(est, 0.01), 2)
-
-    return {
-        "symbol": chosen["symbol"],
-        "contract_type": "CALL" if side == "LONG" else "PUT",
-        "strike": round(chosen["strike"], 2),
-        "expiry": chosen["expiry"].strftime("%d-%m-%Y %H:%M IST"),
-        "hours_to_expiry": round(chosen["hours_left"], 1),
-        "premium_entry": round(chosen["entry"], 2),
-        "mark_price": round(chosen["mark"], 2),
-        "best_bid": round(chosen["bid"], 2) if chosen["bid"] is not None else None,
-        "best_ask": round(chosen["ask"], 2) if chosen["ask"] is not None else None,
-        "spread_pct": round(chosen["spread_pct"], 2) if chosen["spread_pct"] is not None else None,
-        "oi": round(chosen["oi"], 2),
-        "volume": round(chosen["volume"], 2),
-        "delta": round(chosen["delta"], 4) if chosen["delta"] is not None else None,
-        "gamma": round(chosen["gamma"], 8),
-        "theta": round(chosen["theta"], 4) if chosen["theta"] is not None else None,
-        "iv": round(chosen["iv"], 4) if chosen["iv"] is not None else None,
-        "premium_sl_est": premium_estimate(underlying_stop),
-        "premium_t1_est": premium_estimate(targets[0]),
-        "premium_t2_est": premium_estimate(targets[1]),
-        "premium_t3_est": premium_estimate(targets[2]),
-        "estimate_note": "Greek estimate; actual premium changes with IV, theta and order-book movement.",
-    }
-
-
-# ============================================================
 # SIGNAL ENGINE
 # ============================================================
 
 def calculate_signal(asset: str) -> dict | None:
-    # Existing runtime/scanner architecture is intentionally unchanged.
-    # Only strategy inputs/scoring are enriched here.
     df_1d = fetch_candles(asset, "1d", 10)
-    df_4h = fetch_candles(asset, "4h", 100)
     df_1h = fetch_candles(asset, "1h", 120)
     df_15m = fetch_candles(asset, "15m", 150)
     df_5m = fetch_candles(asset, "5m", 200)
 
-    if any(df.empty for df in [df_1d, df_4h, df_1h, df_15m, df_5m]):
+    if any(df.empty for df in [df_1d, df_1h, df_15m, df_5m]):
         return None
 
-    df_4h = add_adx(add_ema(df_4h, [20, 50]), ADX_PERIOD)
-    df_1h = add_adx(add_ema(df_1h, [20, 50]), ADX_PERIOD)
-    df_15m = add_williams_r(add_adx(add_rsi(add_ema(df_15m, [9, 21]), 14), ADX_PERIOD), WILLIAMS_PERIOD)
-    df_5m = add_williams_r(add_adx(add_atr(add_rsi(add_ema(df_5m, [9, 21]), 14), 14), ADX_PERIOD), WILLIAMS_PERIOD)
+    df_1h = add_ema(df_1h, [20, 50])
+    df_15m = add_rsi(add_ema(df_15m, [9, 21]), 14)
+    df_5m = add_atr(add_rsi(add_ema(df_5m, [9, 21]), 14), 14)
 
+    # IMPORTANT: select the newest fully CLOSED candle by close_time,
+    # rather than assuming the second-last row is always the closed one.
     now_utc = pd.Timestamp.now(tz="UTC")
-    h4_closed = df_4h[df_4h["close_time"] <= now_utc]
+
     h1_closed = df_1h[df_1h["close_time"] <= now_utc]
     m15_closed = df_15m[df_15m["close_time"] <= now_utc]
     m5_closed = df_5m[df_5m["close_time"] <= now_utc]
-    if h4_closed.empty or h1_closed.empty or m15_closed.empty or m5_closed.empty:
+
+    if h1_closed.empty or m15_closed.empty or m5_closed.empty:
         return None
 
-    h4, h1, m15, m5 = h4_closed.iloc[-1], h1_closed.iloc[-1], m15_closed.iloc[-1], m5_closed.iloc[-1]
+    h1 = h1_closed.iloc[-1]
+    m15 = m15_closed.iloc[-1]
+    m5 = m5_closed.iloc[-1]
+
     current_price = float(m5["close"])
 
+    # Never create a new signal from stale data.
     if not candle_is_fresh(m5):
         logger.warning("%s: stale 5M candle; signal skipped", asset)
         return None
 
     daily_fibs = get_daily_fib_levels(df_1d)
-    four_hour_fibs = get_4h_fib_levels(df_4h)
     five_min_fibs = get_5m_fib_levels(df_5m)
-    swing_fibs = swing_fib_levels(df_15m)
-    if not daily_fibs or not four_hour_fibs or not five_min_fibs:
+
+    if not daily_fibs or not five_min_fibs:
         return None
 
     structure = recent_structure(df_5m, 8)
+    confluence = fib_confluence(current_price, daily_fibs, five_min_fibs)
 
     # ---------- Direction ----------
-    h4_bull = h4["ema_20"] > h4["ema_50"] and h4["close"] > h4["ema_20"]
-    h4_bear = h4["ema_20"] < h4["ema_50"] and h4["close"] < h4["ema_20"]
     h1_bull = h1["ema_20"] > h1["ema_50"] and h1["close"] > h1["ema_20"]
     h1_bear = h1["ema_20"] < h1["ema_50"] and h1["close"] < h1["ema_20"]
+
     m15_bull = m15["ema_9"] > m15["ema_21"] and m15["rsi"] >= 52
     m15_bear = m15["ema_9"] < m15["ema_21"] and m15["rsi"] <= 48
+
     m5_bull = m5["ema_9"] > m5["ema_21"] and m5["close"] > m5["ema_9"]
     m5_bear = m5["ema_9"] < m5["ema_21"] and m5["close"] < m5["ema_9"]
 
     # ---------- Volume ----------
-    closed_5m = m5_closed
+    closed_5m = df_5m[df_5m["close_time"] <= now_utc]
     vol_avg_20 = float(closed_5m["volume"].tail(20).mean())
     volume_ok = float(m5["volume"]) >= vol_avg_20 * VOLUME_MULTIPLIER
-    candle_direction_long = float(m5["close"]) >= float(m5["open"])
-    candle_direction_short = float(m5["close"]) <= float(m5["open"])
 
-    # ---------- Williams %R / ADX ----------
-    wr15 = float(m15["williams_r"])
-    wr5 = float(m5["williams_r"])
-    prev_wr5 = float(m5_closed.iloc[-2]["williams_r"]) if len(m5_closed) >= 2 else wr5
-    will_long = (prev_wr5 <= -80 and wr5 > prev_wr5) or (-80 <= wr15 <= -35 and wr5 > -70)
-    will_short = (prev_wr5 >= -20 and wr5 < prev_wr5) or (-65 <= wr15 <= -20 and wr5 < -30)
-
-    adx15 = float(m15["adx"]); plus15 = float(m15["plus_di"]); minus15 = float(m15["minus_di"])
-    adx_long = adx15 >= ADX_TREND_MIN and plus15 > minus15
-    adx_short = adx15 >= ADX_TREND_MIN and minus15 > plus15
-
-    # ---------- Directional Fib context ----------
-    long_fib = fib_context_for_side("LONG", current_price, daily_fibs, four_hour_fibs, five_min_fibs, swing_fibs)
-    short_fib = fib_context_for_side("SHORT", current_price, daily_fibs, four_hour_fibs, five_min_fibs, swing_fibs)
-
-    # ---------- Base score: preserve proven original weighting ----------
+    # ---------- Score ----------
     long_score = 0
     short_score = 0
-    if h1_bull: long_score += 20
-    if h1_bear: short_score += 20
-    if m15_bull: long_score += 15
-    if m15_bear: short_score += 15
-    if m5_bull: long_score += 20
-    if m5_bear: short_score += 20
-    if volume_ok and candle_direction_long: long_score += 15
-    if volume_ok and candle_direction_short: short_score += 15
-    if 55 <= m15["rsi"] <= 72: long_score += 10
-    if 28 <= m15["rsi"] <= 45: short_score += 10
-    if structure == "BULLISH": long_score += 10
-    elif structure == "BEARISH": short_score += 10
 
-    # Original neutral Fib points are replaced by direction-aware Fib points.
-    def fib_points(ctx):
-        if ctx.get("triple"): return 10
-        if ctx.get("paired") and ctx.get("swing_near"): return 10
-        if ctx.get("paired"): return 8
-        if ctx.get("swing_near"): return 4
-        if any(ctx.get(k) is not None for k in ("daily_name", "four_name", "five_name")): return 3
-        return 0
-    long_score += fib_points(long_fib)
-    short_score += fib_points(short_fib)
+    # 1H trend = 20
+    if h1_bull:
+        long_score += 20
+    if h1_bear:
+        short_score += 20
 
-    # ---------- Soft confirmation polish ----------
-    # 4H trend is intentionally NOT a hard gate: it upgrades alignment and
-    # penalises counter-trend setups without blocking valid reversals.
-    if h4_bull: long_score += 8
-    if h4_bear: short_score += 8
-    if h4_bear: long_score -= 8
-    if h4_bull: short_score -= 8
+    # 15M setup = 15
+    if m15_bull:
+        long_score += 15
+    if m15_bear:
+        short_score += 15
 
-    if adx_long: long_score += 6
-    elif adx15 < ADX_TREND_MIN: long_score -= 3
-    if adx_short: short_score += 6
-    elif adx15 < ADX_TREND_MIN: short_score -= 3
+    # 5M trigger = 20
+    if m5_bull:
+        long_score += 20
+    if m5_bear:
+        short_score += 20
 
-    if will_long: long_score += 5
-    if will_short: short_score += 5
+    # Volume = 15
+    if volume_ok:
+        long_score += 15
+        short_score += 15
 
-    # A disagreement with the already-established 1H trend is allowed but must
-    # earn enough confirmation elsewhere; this addresses the weak 1H-crossed
-    # screenshot examples without changing the scanner architecture.
-    if h1_bear: long_score -= 7
-    if h1_bull: short_score -= 7
+    # RSI quality = 10
+    if 55 <= m15["rsi"] <= 72:
+        long_score += 10
+    if 28 <= m15["rsi"] <= 45:
+        short_score += 10
 
-    long_score = max(0, min(100, int(round(long_score))))
-    short_score = max(0, min(100, int(round(short_score))))
+    # Structure = 10
+    if structure == "BULLISH":
+        long_score += 10
+    elif structure == "BEARISH":
+        short_score += 10
 
-    # ---------- Existing sideways/volatility/extension guard ----------
+    # Fib confluence = 10
+    if confluence["paired"]:
+        long_score += 10
+        short_score += 10
+    elif confluence["near_daily"] and confluence["near_5m"]:
+        long_score += 8
+        short_score += 8
+    elif confluence["near_daily"] or confluence["near_5m"]:
+        long_score += 4
+        short_score += 4
+
+    # ---------- Sideways filter ----------
     ema_gap_pct = abs(m5["ema_9"] - m5["ema_21"]) / current_price * 100
     atr_pct = float(m5["atr"]) / current_price * 100
+
     choppy = ema_gap_pct < 0.03 and atr_pct < MIN_ATR_PCT
     volatility_invalid = atr_pct < MIN_ATR_PCT or atr_pct > MAX_ATR_PCT
     ema_extension_atr = abs(current_price - float(m5["ema_9"])) / max(float(m5["atr"]), 1e-9)
     overextended = ema_extension_atr > MAX_EMA_EXTENSION_ATR
 
-    common = {
-        "asset": asset, "price": current_price, "long_score": long_score, "short_score": short_score,
-        "daily_fibs": daily_fibs, "four_hour_fibs": four_hour_fibs, "five_min_fibs": five_min_fibs,
-    }
     if choppy or volatility_invalid or overextended:
-        return {**common, "status": "NO_TRADE", "reason": "Choppy / volatility invalid / overextended", "confluence": long_fib if long_score >= short_score else short_fib}
+        return {
+            "asset": asset,
+            "status": "NO_TRADE",
+            "reason": "Choppy / volatility invalid / overextended",
+            "price": current_price,
+            "long_score": long_score,
+            "short_score": short_score,
+            "daily_fibs": daily_fibs,
+            "five_min_fibs": five_min_fibs,
+            "confluence": confluence,
+        }
 
     if long_score >= MIN_SIGNAL_SCORE and long_score > short_score:
-        side, score, side_fib = "LONG", long_score, long_fib
+        side = "LONG"
+        score = long_score
     elif short_score >= MIN_SIGNAL_SCORE and short_score > long_score:
-        side, score, side_fib = "SHORT", short_score, short_fib
+        side = "SHORT"
+        score = short_score
     else:
-        return {**common, "status": "NO_TRADE", "reason": "Score below threshold", "confluence": long_fib if long_score >= short_score else short_fib}
+        return {
+            "asset": asset,
+            "status": "NO_TRADE",
+            "reason": "Score below threshold",
+            "price": current_price,
+            "long_score": long_score,
+            "short_score": short_score,
+            "daily_fibs": daily_fibs,
+            "five_min_fibs": five_min_fibs,
+            "confluence": confluence,
+        }
 
+    side_fib = fib_context_for_side(side, current_price, daily_fibs, five_min_fibs)
+
+    # High-quality scalping signal requires volume confirmation.
     if REQUIRE_VOLUME_FOR_SIGNAL and not volume_ok:
-        return {**common, "status": "NO_TRADE", "reason": "Volume confirmation missing", "confluence": side_fib}
+        return {
+            "asset": asset,
+            "status": "NO_TRADE",
+            "reason": "Volume confirmation missing",
+            "price": current_price,
+            "long_score": long_score,
+            "short_score": short_score,
+            "daily_fibs": daily_fibs,
+            "five_min_fibs": five_min_fibs,
+            "confluence": side_fib,
+        }
 
     atr_now = float(m5["atr"])
     retest_info = breakout_retest_status(df_5m, side, atr_now)
-    gate = pending_signal_gate(asset, side, {"retest_confirmed": retest_info["confirmed"], "candle_close": str(m5["close_time"])})
-    if not gate["allowed"]:
-        return {**common, "status": "NO_TRADE", "reason": f"{gate['state']}: {retest_info['reason']}", "confluence": side_fib}
+    gate = pending_signal_gate(
+        asset,
+        side,
+        {
+            "retest_confirmed": retest_info["confirmed"],
+            "candle_close": str(m5["close_time"]),
+        },
+    )
 
-    if side_fib["daily_name"] is None and side_fib["four_name"] is None and side_fib["five_name"] is None:
-        return {**common, "status": "NO_TRADE", "reason": "No direction-aware Fib context", "confluence": side_fib}
+    if not gate["allowed"]:
+        return {
+            "asset": asset,
+            "status": "NO_TRADE",
+            "reason": f"{gate['state']}: {retest_info['reason']}",
+            "price": current_price,
+            "long_score": long_score,
+            "short_score": short_score,
+            "daily_fibs": daily_fibs,
+            "five_min_fibs": five_min_fibs,
+            "confluence": side_fib,
+        }
+
+    # Require at least one directionally meaningful Fib reference.
+    if side_fib["daily_name"] is None and side_fib["five_name"] is None:
+        return {
+            "asset": asset,
+            "status": "NO_TRADE",
+            "reason": "No direction-aware Fib context",
+            "price": current_price,
+            "long_score": long_score,
+            "short_score": short_score,
+            "daily_fibs": daily_fibs,
+            "five_min_fibs": five_min_fibs,
+            "confluence": confluence,
+        }
 
     atr = float(m5["atr"])
     swing_low = float(closed_5m["low"].tail(6).min())
     swing_high = float(closed_5m["high"].tail(6).max())
+
     if side == "LONG":
-        stop = min(swing_low, current_price - ATR_SL_MULTIPLIER * atr)
+        atr_sl = current_price - ATR_SL_MULTIPLIER * atr
+        stop = min(swing_low, atr_sl)
         risk = current_price - stop
-        if risk <= 0: return None
-        t1, t2, t3 = current_price + risk, current_price + MIN_RR * risk, current_price + 2.5 * risk
+
+        if risk <= 0:
+            return None
+
+        t1 = current_price + risk
+        t2 = current_price + MIN_RR * risk
+        t3 = current_price + 2.5 * risk
+
     else:
-        stop = max(swing_high, current_price + ATR_SL_MULTIPLIER * atr)
+        atr_sl = current_price + ATR_SL_MULTIPLIER * atr
+        stop = max(swing_high, atr_sl)
         risk = stop - current_price
-        if risk <= 0: return None
-        t1, t2, t3 = current_price - risk, current_price - MIN_RR * risk, current_price - 2.5 * risk
+
+        if risk <= 0:
+            return None
+
+        t1 = current_price - risk
+        t2 = current_price - MIN_RR * risk
+        t3 = current_price - 2.5 * risk
 
     rr_t2 = reward_risk(current_price, stop, t2, side)
     if rr_t2 + 1e-9 < MIN_RR:
-        return {**common, "status": "NO_TRADE", "reason": f"R:R below minimum ({rr_t2:.2f})", "confluence": side_fib}
-
-    # Option-chain lookup happens only after the underlying setup is fully
-    # confirmed. API failure is non-fatal and cannot stop the scanner.
-    option = None
-    try:
-        option = select_option_contract(asset, side, current_price, stop, [t1, t2, t3])
-    except Exception:
-        logger.exception("%s option premium enrichment failed", asset)
+        return {
+            "asset": asset,
+            "status": "NO_TRADE",
+            "reason": f"R:R below minimum ({rr_t2:.2f})",
+            "price": current_price,
+            "long_score": long_score,
+            "short_score": short_score,
+            "daily_fibs": daily_fibs,
+            "five_min_fibs": five_min_fibs,
+            "confluence": confluence,
+        }
 
     return {
-        **common,
-        "status": "SIGNAL", "side": side, "score": score,
-        "price": round(current_price, 2), "stop": round(stop, 2),
-        "t1": round(t1, 2), "t2": round(t2, 2), "t3": round(t3, 2),
-        "rsi_15m": round(float(m15["rsi"]), 1), "williams_15m": round(wr15, 1),
-        "williams_5m": round(wr5, 1), "adx_15m": round(adx15, 1),
-        "plus_di_15m": round(plus15, 1), "minus_di_15m": round(minus15, 1),
-        "volume_ok": volume_ok, "structure": structure, "confluence": side_fib,
-        "rr_t2": round(rr_t2, 2), "retest_confirmed": True, "retest_level": retest_info.get("level"),
-        "h4_bull": h4_bull, "h4_bear": h4_bear, "h1_bull": h1_bull, "h1_bear": h1_bear,
-        "m15_bull": m15_bull, "m15_bear": m15_bear, "m5_bull": m5_bull, "m5_bear": m5_bear,
-        "adx_long": adx_long, "adx_short": adx_short, "will_long": will_long, "will_short": will_short,
-        "option": option,
+        "asset": asset,
+        "status": "SIGNAL",
+        "side": side,
+        "score": score,
+        "price": round(current_price, 2),
+        "stop": round(stop, 2),
+        "t1": round(t1, 2),
+        "t2": round(t2, 2),
+        "t3": round(t3, 2),
+        "rsi_15m": round(float(m15["rsi"]), 1),
+        "volume_ok": volume_ok,
+        "structure": structure,
+        "daily_fibs": daily_fibs,
+        "five_min_fibs": five_min_fibs,
+        "confluence": side_fib,
+        "rr_t2": round(rr_t2, 2),
+        "retest_confirmed": True,
+        "retest_level": retest_info.get("level"),
+        "h1_bull": h1_bull,
+        "h1_bear": h1_bear,
+        "m15_bull": m15_bull,
+        "m15_bear": m15_bear,
+        "m5_bull": m5_bull,
+        "m5_bear": m5_bear,
     }
 
 
@@ -1190,6 +999,7 @@ def signal_grade(score: int | float | None) -> str:
 
 def format_signal(signal: dict) -> str:
     asset = signal["asset"]
+
     if signal["status"] != "SIGNAL":
         return (
             f"⛔ <b>KRYPT BRO - NO TRADE</b>\n\n"
@@ -1202,18 +1012,21 @@ def format_signal(signal: dict) -> str:
     side = signal["side"]
     side_icon = "🟢" if side == "LONG" else "🔴"
     c = signal["confluence"]
+
     quality = "STRONG" if signal["score"] >= 85 else "GOOD"
 
-    def level_text(name_key, value_key):
-        n, v = c.get(name_key), c.get(value_key)
-        return f"{n} ${v:,.2f}" if n and v is not None else "N/A"
+    daily_text = (
+        f"{c['daily_name']} ${c['daily_value']:,.2f}"
+        if c["daily_name"] and c["daily_value"] is not None
+        else "N/A"
+    )
+    five_text = (
+        f"{c['five_name']} ${c['five_value']:,.2f}"
+        if c["five_name"] and c["five_value"] is not None
+        else "N/A"
+    )
 
-    daily_text = level_text("daily_name", "daily_value")
-    four_text = level_text("four_name", "four_value")
-    five_text = level_text("five_name", "five_value")
-    swing_text = level_text("swing_name", "swing_value")
-
-    text = (
+    return (
         f"🔥 <b>KRYPT BRO SIGNAL</b>\n\n"
         f"{side_icon} <b>{asset} {side}</b>\n"
         f"Quality: <b>{quality}</b>\n"
@@ -1224,42 +1037,16 @@ def format_signal(signal: dict) -> str:
         f"T2: <b>${signal['t2']:,.2f}</b>\n"
         f"T3: <b>${signal['t3']:,.2f}</b>\n"
         f"R:R to T2: <b>1:{signal['rr_t2']:.2f}</b>\n\n"
-        f"4H Trend: {'✅' if (signal['h4_bull'] if side == 'LONG' else signal['h4_bear']) else '⚠️'}\n"
-        f"1H Trend: {'✅' if (signal['h1_bull'] if side == 'LONG' else signal['h1_bear']) else '⚠️'}\n"
+        f"1H Trend: {'✅' if (signal['h1_bull'] if side == 'LONG' else signal['h1_bear']) else '❌'}\n"
         f"15M Setup: {'✅' if (signal['m15_bull'] if side == 'LONG' else signal['m15_bear']) else '❌'}\n"
         f"5M Trigger: {'✅' if (signal['m5_bull'] if side == 'LONG' else signal['m5_bear']) else '❌'}\n"
         f"Volume: {'✅' if signal['volume_ok'] else '❌'}\n"
         f"Structure: <b>{signal['structure']}</b>\n"
-        f"15M RSI: <b>{signal['rsi_15m']}</b>\n"
-        f"Williams %R 15M/5M: <b>{signal['williams_15m']} / {signal['williams_5m']}</b>\n"
-        f"ADX 15M: <b>{signal['adx_15m']}</b> (+DI {signal['plus_di_15m']} / -DI {signal['minus_di_15m']})\n\n"
+        f"15M RSI: <b>{signal['rsi_15m']}</b>\n\n"
         f"Daily Fib Near: <b>{daily_text}</b>\n"
-        f"4H Fib Near: <b>{four_text}</b>\n"
         f"5M Fib Near: <b>{five_text}</b>\n"
-        f"Swing Fib Near: <b>{swing_text}</b>\n"
-        f"Fib Confluence: <b>{'🔥 TRIPLE' if c.get('triple') else ('✅ YES' if c.get('paired') else 'NO')}</b>"
+        f"Fib Confluence: <b>{'🔥 YES' if c['paired'] else 'NO'}</b>"
     )
-
-    opt = signal.get("option")
-    if opt:
-        spread = f"{opt['spread_pct']:.1f}%" if opt.get("spread_pct") is not None else "N/A"
-        delta = f"{opt['delta']:.3f}" if opt.get("delta") is not None else "N/A"
-        psl = f"${opt['premium_sl_est']:,.2f}" if opt.get("premium_sl_est") is not None else "N/A"
-        pt1 = f"${opt['premium_t1_est']:,.2f}" if opt.get("premium_t1_est") is not None else "N/A"
-        pt2 = f"${opt['premium_t2_est']:,.2f}" if opt.get("premium_t2_est") is not None else "N/A"
-        pt3 = f"${opt['premium_t3_est']:,.2f}" if opt.get("premium_t3_est") is not None else "N/A"
-        text += (
-            f"\n\n🎯 <b>DELTA OPTION</b>\n"
-            f"{opt['symbol']} | {opt['contract_type']}\n"
-            f"Strike: <b>${opt['strike']:,.2f}</b> | Exp: <b>{opt['expiry']}</b>\n"
-            f"Premium now: <b>${opt['premium_entry']:,.2f}</b> (mark ${opt['mark_price']:,.2f})\n"
-            f"Premium est SL/T1/T2/T3: <b>{psl} / {pt1} / {pt2} / {pt3}</b>\n"
-            f"Delta: <b>{delta}</b> | OI: <b>{opt['oi']:,.0f}</b> | Vol: <b>{opt['volume']:,.0f}</b> | Spread: <b>{spread}</b>\n"
-            f"<i>Premium targets are Greek estimates, not guaranteed fills.</i>"
-        )
-    else:
-        text += "\n\n🎯 <b>DELTA OPTION</b>\nOption-chain premium unavailable; underlying signal remains valid."
-    return text
 
 
 # ============================================================
@@ -1326,10 +1113,8 @@ def scan_once() -> None:
                     "grade": signal_grade(signal.get("score")),
                     "rr": signal.get("rr_t2"),
                     "daily_fibs": signal.get("daily_fibs", {}),
-                    "four_hour_fibs": signal.get("four_hour_fibs", {}),
                     "five_min_fibs": signal.get("five_min_fibs", {}),
                     "confluence": signal.get("confluence", {}),
-                    "option": signal.get("option"),
                     "updated_at": now_txt,
                 }
             else:
@@ -1346,10 +1131,8 @@ def scan_once() -> None:
                     "grade": signal_grade(max(signal.get("long_score", 0), signal.get("short_score", 0))),
                     "rr": None,
                     "daily_fibs": signal.get("daily_fibs", {}),
-                    "four_hour_fibs": signal.get("four_hour_fibs", {}),
                     "five_min_fibs": signal.get("five_min_fibs", {}),
                     "confluence": signal.get("confluence", {}),
-                    "option": signal.get("option"),
                     "updated_at": now_txt,
                 }
 
@@ -1368,12 +1151,7 @@ def scan_once() -> None:
                     "rr": signal.get("rr_t2"),
                     "retest_level": signal.get("retest_level"),
                     "daily_fibs": signal.get("daily_fibs"),
-                    "four_hour_fibs": signal.get("four_hour_fibs"),
                     "five_min_fibs": signal.get("five_min_fibs"),
-                    "williams_15m": signal.get("williams_15m"),
-                    "williams_5m": signal.get("williams_5m"),
-                    "adx_15m": signal.get("adx_15m"),
-                    "option": signal.get("option"),
                 })
 
                 logger.info(
