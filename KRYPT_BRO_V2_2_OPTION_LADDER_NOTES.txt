@@ -1,0 +1,27 @@
+KRYPT BRO Strategy V2.2 - Compact Delta Option Premium Ladder
+
+Scope preserved:
+- BTC / ETH / GOLD only
+- Delta Exchange options only
+- Existing scanner/runtime/Telegram lifecycle unchanged
+- Strategy V2.1 indicators unchanged (4H/1H/15M/5M, Williams %R, ADX/DI, Fibonacci, RSI, volume)
+
+Added:
+1. One Delta public option-chain fetch after a qualified underlying signal.
+2. Nearest valid expiry selected automatically.
+3. ATM strike chosen nearest to current underlying price.
+4. Compact ladder shows ATM plus up to 4 strikes below and 4 strikes above (maximum 9 rows).
+5. For every strike, CALL and PUT premium are shown together.
+6. Buy-side premium uses best ask where available, otherwise mark price.
+7. The same API response is reused by directional option selection to avoid duplicate network calls.
+8. Any option-chain/API failure is non-fatal: core signal/scanner continues normally.
+
+Telegram example:
+CALL        STRIKE        PUT
+  xxx       100000        xxx
+  xxx       101000        xxx
+  xxx       102000        xxx  <- ATM
+  xxx       103000        xxx
+  xxx       104000        xxx
+
+No order execution was added.
