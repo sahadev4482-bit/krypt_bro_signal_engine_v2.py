@@ -1,0 +1,27 @@
+KRYPT BRO V2.3 - MANUAL DELTA OPTION LADDER COMMANDS
+=====================================================
+
+Added only a separate read-only Telegram command listener.
+Existing scanner loop, strategy lifecycle, automatic signals, Delta WebSocket,
+dashboard, trading runtime and existing Telegram outbound alerts are unchanged.
+
+Commands:
+  /btc          -> BTC nearest-expiry option ladder
+  /eth          -> ETH nearest-expiry option ladder
+  /gold         -> GOLD nearest-expiry option ladder
+  /options      -> all 3 ladders
+  /option BTC   -> generic command (BTC / ETH / GOLD)
+  /help         -> command list
+
+Ladder:
+  nearest expiry
+  ATM + up to 4 strikes below + 4 above
+  CALL premium | STRIKE | PUT premium
+  premium uses best ask where available, otherwise mark price
+
+Security:
+  if TELEGRAM_CHAT_ID is configured, commands are accepted only from that chat.
+  this feature is read-only and cannot place orders.
+
+Start command remains:
+  python app.py

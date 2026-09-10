@@ -1,8 +1,10 @@
 from backend.app_core import app, scanner_loop, eng, delta_ws
+from backend import telegram_commands
 import os, threading
 
 if __name__ == "__main__":
     delta_ws.start()
+    telegram_commands.start()
     threading.Thread(target=scanner_loop, daemon=True).start()
     threading.Thread(target=eng.keep_alive_ping, daemon=True).start()
     port = int(os.getenv("PORT", "10000"))

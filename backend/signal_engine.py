@@ -854,14 +854,97 @@ def fetch_delta_option_chain(asset: str) -> list[dict]:
     return rows
 
 
-def select_option_contract(asset: str, side: str, underlying_price: float, underlying_stop: float, targets: list[float]) -> dict | None:
+
+def build_option_chain_snapshot(asset: str, underlying_price: float, chain: list[dict] | None = None, wing_count: int = 4) -> dict | None:
+    """Return nearest-expiry option premiums around spot: ATM + N strikes above/below.
+
+    Read-only helper. Uses ask price when available (realistic option-buy price),
+    otherwise mark price. Failure is non-fatal and never affects the signal engine.
+    """
+    if chain is None:
+        chain = fetch_delta_option_chain(asset)
+    if not chain:
+        return None
+
+    now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+    parsed = []
+    for row in chain:
+        ctype = row.get("contract_type")
+        if ctype not in ("call_options", "put_options"):
+            continue
+        symbol = str(row.get("symbol") or "")
+        expiry = _option_expiry_from_symbol(symbol, asset)
+        strike = _fnum(row.get("strike_price"))
+        mark = _fnum(row.get("mark_price"))
+        if expiry is None or strike is None or mark is None or mark <= 0:
+            continue
+        hours_left = (expiry - now_ist).total_seconds() / 3600.0
+        if hours_left < OPTION_MIN_EXPIRY_HOURS:
+            continue
+        quotes = row.get("quotes") or {}
+        bid = _fnum(quotes.get("best_bid"))
+        ask = _fnum(quotes.get("best_ask"))
+        premium = ask if ask is not None and ask > 0 else mark
+        parsed.append({
+            "contract_type": ctype,
+            "symbol": symbol,
+            "expiry": expiry,
+            "strike": strike,
+            "mark": mark,
+            "bid": bid,
+            "ask": ask,
+            "premium": premium,
+        })
+
+    if not parsed:
+        return None
+
+    nearest_expiry = min(x["expiry"] for x in parsed)
+    rows = [x for x in parsed if x["expiry"] == nearest_expiry]
+    strikes = sorted({x["strike"] for x in rows})
+    if not strikes:
+        return None
+
+    atm_index = min(range(len(strikes)), key=lambda i: abs(strikes[i] - underlying_price))
+    lo = max(0, atm_index - max(1, int(wing_count)))
+    hi = min(len(strikes), atm_index + max(1, int(wing_count)) + 1)
+    selected_strikes = strikes[lo:hi]
+
+    by_key = {(x["strike"], x["contract_type"]): x for x in rows}
+    ladder = []
+    for strike in selected_strikes:
+        call = by_key.get((strike, "call_options"))
+        put = by_key.get((strike, "put_options"))
+        ladder.append({
+            "strike": round(strike, 8),
+            "is_atm": strike == strikes[atm_index],
+            "call_premium": round(call["premium"], 4) if call else None,
+            "put_premium": round(put["premium"], 4) if put else None,
+            "call_mark": round(call["mark"], 4) if call else None,
+            "put_mark": round(put["mark"], 4) if put else None,
+            "call_symbol": call["symbol"] if call else None,
+            "put_symbol": put["symbol"] if put else None,
+        })
+
+    return {
+        "spot": round(float(underlying_price), 4),
+        "atm_strike": round(strikes[atm_index], 8),
+        "expiry": nearest_expiry.strftime("%d-%m-%Y %H:%M IST"),
+        "wing_count": int(wing_count),
+        "rows": ladder,
+        "premium_source": "best ask when available, otherwise mark",
+    }
+
+
+def select_option_contract(asset: str, side: str, underlying_price: float, underlying_stop: float, targets: list[float], chain: list[dict] | None = None) -> dict | None:
     """
     Choose a liquid near-ATM/near-ITM Delta option and calculate current premium
     plus Greek-based premium estimates at underlying SL/T1/T2/T3.
 
     These are estimates only; IV/theta changes can materially alter realised premium.
     """
-    chain = fetch_delta_option_chain(asset)
+    if chain is None:
+        chain = fetch_delta_option_chain(asset)
     if not chain:
         return None
 
@@ -1150,8 +1233,13 @@ def calculate_signal(asset: str) -> dict | None:
     # Option-chain lookup happens only after the underlying setup is fully
     # confirmed. API failure is non-fatal and cannot stop the scanner.
     option = None
+    option_chain = None
     try:
-        option = select_option_contract(asset, side, current_price, stop, [t1, t2, t3])
+        # One public API fetch is reused for both the compact chain display and
+        # the directional option selection. This keeps the existing scanner light.
+        raw_option_chain = fetch_delta_option_chain(asset)
+        option_chain = build_option_chain_snapshot(asset, current_price, raw_option_chain, wing_count=4)
+        option = select_option_contract(asset, side, current_price, stop, [t1, t2, t3], chain=raw_option_chain)
     except Exception:
         logger.exception("%s option premium enrichment failed", asset)
 
@@ -1169,6 +1257,7 @@ def calculate_signal(asset: str) -> dict | None:
         "m15_bull": m15_bull, "m15_bear": m15_bear, "m5_bull": m5_bull, "m5_bear": m5_bear,
         "adx_long": adx_long, "adx_short": adx_short, "will_long": will_long, "will_short": will_short,
         "option": option,
+        "option_chain": option_chain,
     }
 
 
@@ -1239,6 +1328,36 @@ def format_signal(signal: dict) -> str:
         f"Swing Fib Near: <b>{swing_text}</b>\n"
         f"Fib Confluence: <b>{'🔥 TRIPLE' if c.get('triple') else ('✅ YES' if c.get('paired') else 'NO')}</b>"
     )
+
+    chain_view = signal.get("option_chain")
+    if chain_view and chain_view.get("rows"):
+        def _premium_text(value):
+            if value is None:
+                return "-"
+            v = float(value)
+            if abs(v) >= 1000:
+                return f"{v:,.0f}"
+            if abs(v) >= 100:
+                return f"{v:,.1f}"
+            if abs(v) >= 1:
+                return f"{v:,.2f}"
+            return f"{v:,.4f}"
+
+        text += (
+            f"\n\n📊 <b>DELTA OPTION CHAIN · NEAREST EXPIRY</b>\n"
+            f"Spot: <b>${chain_view['spot']:,.2f}</b> | ATM: <b>{chain_view['atm_strike']:,.2f}</b>\n"
+            f"Expiry: <b>{chain_view['expiry']}</b>\n"
+            f"<code>CALL        STRIKE        PUT</code>\n"
+        )
+        for row in chain_view["rows"]:
+            atm = " ◀ATM" if row.get("is_atm") else ""
+            cp = _premium_text(row.get("call_premium"))
+            pp = _premium_text(row.get("put_premium"))
+            strike = f"{float(row['strike']):,.2f}"
+            text += f"<code>{cp:>8}  {strike:>12}  {pp:>8}</code>{atm}\n"
+        text += "<i>Premium = best ask when available; otherwise mark.</i>"
+    else:
+        text += "\n\n📊 <b>DELTA OPTION CHAIN</b>\nPremium ladder unavailable; core signal continues normally."
 
     opt = signal.get("option")
     if opt:
