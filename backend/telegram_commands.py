@@ -132,6 +132,15 @@ def build_ladder_message(asset: str) -> str:
     return "\n".join(lines)
 
 
+
+def build_daily_analysis_message():
+    st=eng.analytics.daily_summary()
+    if not st.get("closed"):
+        return f"📈 <b>KRYPT BRO DAILY • {st.get('date')}</b>\\nClosed signals: <b>0</b>"
+    lines=[f"📈 <b>KRYPT BRO DAILY • {st['date']}</b>","",f"Closed: <b>{st['closed']}</b> | Success: <b>{st['wins']}</b> | Fail: <b>{st['losses']}</b>",f"Win rate: <b>{st['win_rate']:.1f}%</b> | Net: <b>{st['total_r']:+.2f}R</b> | Avg: <b>{st['avg_r']:+.2f}R</b>",f"T1: <b>{st['t1_rate']:.1f}%</b> | T2: <b>{st['t2_rate']:.1f}%</b> | T3: <b>{st['t3_rate']:.1f}%</b>","", "<b>BY ASSET</b>"]
+    for asset,x in st["by_asset"].items(): lines.append(f"{asset}: {x['trades']} • {x['wins']}W/{x['losses']}L • {x['win_rate']:.1f}% • {x['total_r']:+.2f}R")
+    return "\\n".join(lines)
+
 def _help_message() -> str:
     return (
         "🤖 <b>KRYPT BRO OPTION COMMANDS</b>\n\n"
@@ -140,6 +149,7 @@ def _help_message() -> str:
         "/gold — GOLD option premiums\n"
         "/options — BTC + ETH + GOLD\n"
         "/option BTC — generic asset command\n"
+        "/daily — today success/fail analysis\n"
         "/help — show commands\n\n"
         "Each ladder shows nearest expiry, ATM and up to 4 strikes below + 4 above."
     )
@@ -179,6 +189,10 @@ def handle_text(chat_id, text: str) -> bool:
             _send(chat_id, build_ladder_message(asset))
         return True
 
+    if cmd == "/daily":
+        _send(chat_id, build_daily_analysis_message())
+        return True
+
     if cmd in ("/help", "/start"):
         _send(chat_id, _help_message())
         return True
@@ -201,7 +215,7 @@ def _poll_loop() -> None:
     except Exception:
         pass
 
-    eng.logger.info("Telegram option command listener started: /btc /eth /gold /options /option")
+    eng.logger.info("Telegram command listener started: /btc /eth /gold /options /option /daily")
 
     while not _STOP.is_set():
         try:

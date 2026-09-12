@@ -1,0 +1,28 @@
+KRYPT BRO Strategy V2.4 - Balanced Gate / Daily Signal Target
+
+Baseline: V2.3 Telegram Option Commands.
+Existing scanner, Delta WebSocket, option-chain commands, signal lifecycle, Telegram delivery and dashboard structure are preserved.
+
+Changes only in backend/signal_engine.py:
+1. Volume confirmation changed from hard veto to soft -6 score penalty.
+2. Choppy and normal EMA overextension changed from hard vetoes to soft penalties (-5 / -7).
+3. Only extreme ATR conditions or >2.60 ATR extension remain hard blockers.
+4. 5M directional trigger is now mandatory (fixes prior cases where a high-score signal could show 5M Trigger = X).
+5. Classical breakout/retest remains preferred. Strong fully aligned setups (score >= 86) may use MOMENTUM_CONFIRM after 2 qualifying closed 5M candles instead of repeatedly expiring.
+6. Daily signal target added: default 2 entry signals per IST day. It is a soft target only; trades are never fabricated.
+7. If the daily target is not reached after 12:00 IST, threshold can mildly relax from 75 to 72. Once target is reached it returns to 75.
+8. Telegram signal now displays Gate: CONFIRMED or MOMENTUM_CONFIRM.
+
+New/adjustable env vars:
+DAILY_MIN_SIGNAL_TARGET=2
+ADAPTIVE_MIN_SCORE=72
+ADAPTIVE_START_HOUR_IST=12
+VOLUME_MISSING_PENALTY=6
+CHOPPY_PENALTY=5
+OVEREXTENDED_PENALTY=7
+EXTREME_EXTENSION_ATR=2.60
+RETEST_BYPASS_SCORE=86
+RETEST_BYPASS_AFTER_CANDLES=2
+REQUIRE_5M_TRIGGER=true
+
+Important: daily target is not a guarantee. If market conditions fail basic safety/trigger/fib/risk checks, the bot stays NO TRADE.

@@ -62,3 +62,24 @@ def summary():
             "avg_r":round(sum(rs)/len(rs),3),"profit_factor":None if gl==0 else round(gp/gl,3),
             "total_r":round(sum(rs),3),"t1_rate":rate("t1_hit"),"t2_rate":rate("t2_hit"),
             "t3_rate":rate("t3_hit"),"by_asset":by}
+
+def daily_summary(day_ist=None):
+    from zoneinfo import ZoneInfo
+    ist=ZoneInfo("Asia/Kolkata")
+    if day_ist is None: day_ist=datetime.now(ist).date()
+    rows=[]
+    for x in read_trades():
+        try:
+            dt=datetime.fromisoformat((x.get("closed_at") or "").replace("Z","+00:00"))
+            if dt.tzinfo is None: dt=dt.replace(tzinfo=timezone.utc)
+            if dt.astimezone(ist).date()==day_ist: rows.append(x)
+        except Exception: pass
+    if not rows:return {"date":str(day_ist),"closed":0}
+    rs=[float(x.get("result_r") or 0) for x in rows]; truth=lambda v:str(v).lower()=="true"
+    rate=lambda k:round(100*sum(truth(x.get(k)) for x in rows)/len(rows),1)
+    by={}
+    for asset in sorted(set(x.get("asset") or "?" for x in rows)):
+        ar=[x for x in rows if (x.get("asset") or "?")==asset]; rr=[float(x.get("result_r") or 0) for x in ar]
+        by[asset]={"trades":len(ar),"wins":sum(r>0 for r in rr),"losses":sum(r<=0 for r in rr),"win_rate":round(100*sum(r>0 for r in rr)/len(rr),1),"total_r":round(sum(rr),2)}
+    wins=sum(r>0 for r in rs)
+    return {"date":str(day_ist),"closed":len(rows),"wins":wins,"losses":sum(r<=0 for r in rs),"win_rate":round(100*wins/len(rows),1),"total_r":round(sum(rs),2),"avg_r":round(sum(rs)/len(rows),2),"t1_rate":rate("t1_hit"),"t2_rate":rate("t2_hit"),"t3_rate":rate("t3_hit"),"by_asset":by}

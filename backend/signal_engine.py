@@ -51,8 +51,8 @@ SCAN_INTERVAL_SECONDS = int(os.getenv("SCAN_INTERVAL_SECONDS", "20"))
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 
-MIN_SIGNAL_SCORE = int(os.getenv("MIN_SIGNAL_SCORE", "75"))
-SIGNAL_COOLDOWN_SECONDS = int(os.getenv("SIGNAL_COOLDOWN_SECONDS", "900"))
+MIN_SIGNAL_SCORE = int(os.getenv("MIN_SIGNAL_SCORE", "70"))
+SIGNAL_COOLDOWN_SECONDS = int(os.getenv("SIGNAL_COOLDOWN_SECONDS", "600"))
 
 # Scanner / Telegram runtime controls
 SCANNER_ENABLED = True
@@ -83,6 +83,20 @@ ATR_SL_MULTIPLIER = float(os.getenv("ATR_SL_MULTIPLIER", "1.20"))
 ADX_PERIOD = int(os.getenv("ADX_PERIOD", "14"))
 ADX_TREND_MIN = float(os.getenv("ADX_TREND_MIN", "20"))
 WILLIAMS_PERIOD = int(os.getenv("WILLIAMS_PERIOD", "14"))
+
+# TRUE SCALP v2.5: faster 5M entries while preserving hard risk/trigger guards.
+# DAILY_MIN_SIGNAL_TARGET is a soft target only; the engine never fabricates a trade.
+DAILY_MIN_SIGNAL_TARGET = int(os.getenv("DAILY_MIN_SIGNAL_TARGET", "4"))
+ADAPTIVE_MIN_SCORE = int(os.getenv("ADAPTIVE_MIN_SCORE", "67"))
+ADAPTIVE_START_HOUR_IST = int(os.getenv("ADAPTIVE_START_HOUR_IST", "10"))
+VOLUME_MISSING_PENALTY = int(os.getenv("VOLUME_MISSING_PENALTY", "4"))
+CHOPPY_PENALTY = int(os.getenv("CHOPPY_PENALTY", "3"))
+OVEREXTENDED_PENALTY = int(os.getenv("OVEREXTENDED_PENALTY", "5"))
+EXTREME_EXTENSION_ATR = float(os.getenv("EXTREME_EXTENSION_ATR", "2.60"))
+RETEST_BYPASS_SCORE = int(os.getenv("RETEST_BYPASS_SCORE", "80"))
+RETEST_BYPASS_AFTER_CANDLES = int(os.getenv("RETEST_BYPASS_AFTER_CANDLES", "1"))
+REQUIRE_5M_TRIGGER = os.getenv("REQUIRE_5M_TRIGGER", "true").lower() == "true"
+
 OPTION_MIN_EXPIRY_HOURS = float(os.getenv("OPTION_MIN_EXPIRY_HOURS", "2.0"))
 OPTION_MAX_SPREAD_PCT = float(os.getenv("OPTION_MAX_SPREAD_PCT", "12.0"))
 OPTION_TARGET_DELTA_MIN = float(os.getenv("OPTION_TARGET_DELTA_MIN", "0.30"))
@@ -115,6 +129,29 @@ LAST_SIGNAL = {asset: {"side": None, "time": 0} for asset in ASSETS}
 # 1D/1H/15M/5M data every 20 seconds.
 LAST_PROCESSED_5M_CLOSE = {asset: None for asset in ASSETS}
 PENDING_SIGNALS = {asset: None for asset in ASSETS}
+
+# Entry-signal count is used only for a mild late-day threshold relaxation.
+# It does not force a signal and resets automatically on the IST calendar day.
+DAILY_SIGNAL_STATS = {"date": None, "count": 0}
+
+def _refresh_daily_signal_stats() -> None:
+    today = datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    if DAILY_SIGNAL_STATS.get("date") != today:
+        DAILY_SIGNAL_STATS["date"] = today
+        DAILY_SIGNAL_STATS["count"] = 0
+
+def effective_signal_threshold() -> int:
+    _refresh_daily_signal_stats()
+    now_ist = datetime.now(ZoneInfo("Asia/Kolkata"))
+    if DAILY_SIGNAL_STATS["count"] >= DAILY_MIN_SIGNAL_TARGET:
+        return MIN_SIGNAL_SCORE
+    if now_ist.hour < ADAPTIVE_START_HOUR_IST:
+        return MIN_SIGNAL_SCORE
+    return max(ADAPTIVE_MIN_SCORE, MIN_SIGNAL_SCORE - 3)
+
+def record_entry_signal_sent() -> None:
+    _refresh_daily_signal_stats()
+    DAILY_SIGNAL_STATS["count"] += 1
 
 ASSET_ENABLED = {asset: True for asset in ASSETS}
 LATEST_STATUS = {
@@ -777,31 +814,30 @@ def breakout_retest_status(df_5m: pd.DataFrame, side: str, atr: float) -> dict:
 
 
 def pending_signal_gate(asset: str, side: str, setup: dict) -> dict:
-    """
-    Keeps an unconfirmed setup alive for a few closed 5M candles.
-    If not confirmed in SIGNAL_EXPIRY_CANDLES, expire it.
-    """
+    """Balanced retest gate with a strong-momentum fallback after a short wait."""
     current_close = setup.get("candle_close")
     pending = PENDING_SIGNALS.get(asset)
 
     if setup.get("retest_confirmed"):
         PENDING_SIGNALS[asset] = None
-        return {"allowed": True, "state": "CONFIRMED"}
+        return {"allowed": True, "state": "CONFIRMED", "fallback": False}
+
+    strong_fallback = bool(setup.get("strong_fallback"))
 
     if pending is None or pending.get("side") != side:
-        PENDING_SIGNALS[asset] = {
-            "side": side,
-            "first_close": current_close,
-            "age": 1,
-        }
-        return {"allowed": False, "state": "WAITING_RETEST"}
+        PENDING_SIGNALS[asset] = {"side": side, "first_close": current_close, "age": 1}
+        return {"allowed": False, "state": "WAITING_RETEST", "fallback": False}
 
     pending["age"] += 1
+    if strong_fallback and pending["age"] >= RETEST_BYPASS_AFTER_CANDLES:
+        PENDING_SIGNALS[asset] = None
+        return {"allowed": True, "state": "MOMENTUM_CONFIRM", "fallback": True}
+
     if pending["age"] > SIGNAL_EXPIRY_CANDLES:
         PENDING_SIGNALS[asset] = None
-        return {"allowed": False, "state": "EXPIRED"}
+        return {"allowed": False, "state": "EXPIRED", "fallback": False}
 
-    return {"allowed": False, "state": "WAITING_RETEST"}
+    return {"allowed": False, "state": "WAITING_RETEST", "fallback": False}
 
 
 # ============================================================
@@ -1178,39 +1214,71 @@ def calculate_signal(asset: str) -> dict | None:
     long_score = max(0, min(100, int(round(long_score))))
     short_score = max(0, min(100, int(round(short_score))))
 
-    # ---------- Existing sideways/volatility/extension guard ----------
+    # ---------- TRUE SCALP sideways/volatility/extension guard v2.5 ----------
     ema_gap_pct = abs(m5["ema_9"] - m5["ema_21"]) / current_price * 100
     atr_pct = float(m5["atr"]) / current_price * 100
     choppy = ema_gap_pct < 0.03 and atr_pct < MIN_ATR_PCT
-    volatility_invalid = atr_pct < MIN_ATR_PCT or atr_pct > MAX_ATR_PCT
+    extreme_low_vol = atr_pct < (MIN_ATR_PCT * 0.45)
+    extreme_high_vol = atr_pct > MAX_ATR_PCT
     ema_extension_atr = abs(current_price - float(m5["ema_9"])) / max(float(m5["atr"]), 1e-9)
     overextended = ema_extension_atr > MAX_EMA_EXTENSION_ATR
+    extreme_extension = ema_extension_atr > EXTREME_EXTENSION_ATR
+
+    if choppy:
+        long_score = max(0, long_score - CHOPPY_PENALTY)
+        short_score = max(0, short_score - CHOPPY_PENALTY)
+    if overextended:
+        long_score = max(0, long_score - OVEREXTENDED_PENALTY)
+        short_score = max(0, short_score - OVEREXTENDED_PENALTY)
 
     common = {
         "asset": asset, "price": current_price, "long_score": long_score, "short_score": short_score,
         "daily_fibs": daily_fibs, "four_hour_fibs": four_hour_fibs, "five_min_fibs": five_min_fibs,
     }
-    if choppy or volatility_invalid or overextended:
-        return {**common, "status": "NO_TRADE", "reason": "Choppy / volatility invalid / overextended", "confluence": long_fib if long_score >= short_score else short_fib}
+    if extreme_low_vol or extreme_high_vol or extreme_extension:
+        return {**common, "status": "NO_TRADE", "reason": "Extreme volatility / extension guard", "confluence": long_fib if long_score >= short_score else short_fib}
 
-    if long_score >= MIN_SIGNAL_SCORE and long_score > short_score:
+    threshold = effective_signal_threshold()
+    if long_score >= threshold and long_score > short_score:
         side, score, side_fib = "LONG", long_score, long_fib
-    elif short_score >= MIN_SIGNAL_SCORE and short_score > long_score:
+    elif short_score >= threshold and short_score > long_score:
         side, score, side_fib = "SHORT", short_score, short_fib
     else:
-        return {**common, "status": "NO_TRADE", "reason": "Score below threshold", "confluence": long_fib if long_score >= short_score else short_fib}
+        return {**common, "status": "NO_TRADE", "reason": f"Score below threshold ({threshold})", "confluence": long_fib if long_score >= short_score else short_fib}
 
+    trigger_ok = m5_bull if side == "LONG" else m5_bear
+    if REQUIRE_5M_TRIGGER and not trigger_ok:
+        return {**common, "status": "NO_TRADE", "reason": "5M trigger missing", "confluence": side_fib}
+
+    # Volume is a soft confirmation in v2.4.
     if REQUIRE_VOLUME_FOR_SIGNAL and not volume_ok:
-        return {**common, "status": "NO_TRADE", "reason": "Volume confirmation missing", "confluence": side_fib}
-
-    atr_now = float(m5["atr"])
-    retest_info = breakout_retest_status(df_5m, side, atr_now)
-    gate = pending_signal_gate(asset, side, {"retest_confirmed": retest_info["confirmed"], "candle_close": str(m5["close_time"])})
-    if not gate["allowed"]:
-        return {**common, "status": "NO_TRADE", "reason": f"{gate['state']}: {retest_info['reason']}", "confluence": side_fib}
+        score = max(0, score - VOLUME_MISSING_PENALTY)
+        if side == "LONG":
+            long_score = score
+        else:
+            short_score = score
+        common["long_score"], common["short_score"] = long_score, short_score
+        if score < threshold:
+            return {**common, "status": "NO_TRADE", "reason": f"Volume soft penalty -> score below threshold ({threshold})", "confluence": side_fib}
 
     if side_fib["daily_name"] is None and side_fib["four_name"] is None and side_fib["five_name"] is None:
         return {**common, "status": "NO_TRADE", "reason": "No direction-aware Fib context", "confluence": side_fib}
+
+    trend_aligned = (h4_bull and h1_bull) if side == "LONG" else (h4_bear and h1_bear)
+    setup_aligned = m15_bull if side == "LONG" else m15_bear
+    adx_aligned = adx_long if side == "LONG" else adx_short
+    structure_aligned = structure == ("BULLISH" if side == "LONG" else "BEARISH")
+    strong_fallback = (score >= RETEST_BYPASS_SCORE and trigger_ok and trend_aligned and (setup_aligned or adx_aligned or structure_aligned))
+
+    atr_now = float(m5["atr"])
+    retest_info = breakout_retest_status(df_5m, side, atr_now)
+    gate = pending_signal_gate(asset, side, {
+        "retest_confirmed": retest_info["confirmed"],
+        "strong_fallback": strong_fallback,
+        "candle_close": str(m5["close_time"]),
+    })
+    if not gate["allowed"]:
+        return {**common, "status": "NO_TRADE", "reason": f"{gate['state']}: {retest_info['reason']}", "confluence": side_fib}
 
     atr = float(m5["atr"])
     swing_low = float(closed_5m["low"].tail(6).min())
@@ -1252,7 +1320,9 @@ def calculate_signal(asset: str) -> dict | None:
         "williams_5m": round(wr5, 1), "adx_15m": round(adx15, 1),
         "plus_di_15m": round(plus15, 1), "minus_di_15m": round(minus15, 1),
         "volume_ok": volume_ok, "structure": structure, "confluence": side_fib,
-        "rr_t2": round(rr_t2, 2), "retest_confirmed": True, "retest_level": retest_info.get("level"),
+        "rr_t2": round(rr_t2, 2), "retest_confirmed": bool(retest_info.get("confirmed")),
+        "retest_mode": gate.get("state"), "retest_level": retest_info.get("level"),
+        "signal_threshold": threshold,
         "h4_bull": h4_bull, "h4_bear": h4_bear, "h1_bull": h1_bull, "h1_bear": h1_bear,
         "m15_bull": m15_bull, "m15_bear": m15_bear, "m5_bull": m5_bull, "m5_bear": m5_bear,
         "adx_long": adx_long, "adx_short": adx_short, "will_long": will_long, "will_short": will_short,
@@ -1306,7 +1376,8 @@ def format_signal(signal: dict) -> str:
         f"🔥 <b>KRYPT BRO SIGNAL</b>\n\n"
         f"{side_icon} <b>{asset} {side}</b>\n"
         f"Quality: <b>{quality}</b>\n"
-        f"Score: <b>{signal['score']}/100</b>\n\n"
+        f"Score: <b>{signal['score']}/100</b>\n"
+        f"Gate: <b>{signal.get('retest_mode', 'CONFIRMED')}</b>\n\n"
         f"Entry: <b>${signal['price']:,.2f}</b>\n"
         f"SL: <b>${signal['stop']:,.2f}</b>\n"
         f"T1: <b>${signal['t1']:,.2f}</b>\n"
@@ -1505,6 +1576,11 @@ def scan_once() -> None:
 
                 if should_send_signal(asset, signal["side"]):
                     send_telegram_alert(format_signal(signal))
+                    record_entry_signal_sent()
+                    logger.info(
+                        "Daily entry signal count (IST): %s/%s | active threshold=%s",
+                        DAILY_SIGNAL_STATS.get("count"), DAILY_MIN_SIGNAL_TARGET, effective_signal_threshold()
+                    )
             else:
                 logger.info(
                     "%s NO TRADE | long=%s short=%s | %s",
@@ -1523,6 +1599,10 @@ def main() -> None:
     logger.info("Market data source: DELTA INDIA ONLY")
     logger.info("GOLD source: PAXGUSD")
     logger.info("Full strategy scan: NEW CLOSED 5M CANDLE ONLY")
+    logger.info(
+        "TRUE SCALP v2.5 | daily soft target=%s (aim 4-8, never forced) | base threshold=%s | adaptive floor=%s",
+        DAILY_MIN_SIGNAL_TARGET, MIN_SIGNAL_SCORE, ADAPTIVE_MIN_SCORE
+    )
     logger.info("Assets: %s", ", ".join(ASSETS))
     logger.info("Minimum score: %s", MIN_SIGNAL_SCORE)
     logger.info("Scanner: %s", "ON" if SCANNER_ENABLED else "OFF")

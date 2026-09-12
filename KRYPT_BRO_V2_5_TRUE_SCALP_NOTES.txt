@@ -1,0 +1,5 @@
+V2.5 TRUE SCALP
+Aim roughly 4-8 BTC+ETH+GOLD opportunities/day when market permits; never forced.
+Score 70; adaptive 67; soft target 4; cooldown 10m; volume/choppy/extension softened; retest fallback after 1 candle at score 80.
+5M trigger remains mandatory. Minimum RR remains 1:1.80.
+Telegram /daily gives today's success/fail, win rate, net/avg R, T1/T2/T3 rates and per-asset breakdown.
